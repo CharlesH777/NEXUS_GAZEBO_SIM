@@ -261,6 +261,10 @@ robot_sim_omni.xacro
 - `7` / `showcase` -> `space_maps_showcase.world`
 - `8` / `cave` / `ltu_cave` -> `darpa_cave_01.world`
 
+如果你不传任何地图参数，当前默认就是：
+
+- `3` -> `marsyard2020_map_only.world`
+
 #### C. 自动设置默认出生点
 
 不同 world 有不同默认 `z` 值，避免车一生成就埋进地面或者悬空过高。
@@ -348,6 +352,8 @@ MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1
 ```bash
 bash ./run_sim_local.sh
 ```
+
+不带参数时默认启动 `3` 号地图，也就是 `marsyard2020_map_only.world`。
 
 如果你想显式表达“我要 GUI 版 bare 仿真”，也可以直接：
 

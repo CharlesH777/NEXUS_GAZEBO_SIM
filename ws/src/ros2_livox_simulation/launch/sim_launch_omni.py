@@ -30,7 +30,7 @@ def _is_true(value: str) -> bool:
 
 
 def _resolve_livox_root(pkg_share: str) -> str:
-    world_rel = os.path.join("world", "rm_2026_slam_world.world")
+    world_rel = os.path.join("world", "marsyard2020_map_only.world")
     candidates = [
         os.getenv("LIVOX_SIM_ROOT", ""),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
@@ -386,7 +386,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "world_name",
-                default_value=os.getenv("MAP_SIM_WORLD", "rm_2026_slam_world.world"),
+                default_value=os.getenv("MAP_SIM_WORLD", "marsyard2020_map_only.world"),
                 description="World file name under ros2_livox_simulation/world or an absolute path.",
             ),
             DeclareLaunchArgument(

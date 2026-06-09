@@ -257,7 +257,7 @@ if [ -n "$MAP_SELECTOR" ]; then
   fi
 fi
 
-export MAP_SIM_WORLD="${MAP_SIM_WORLD:-rm_2026_slam_world.world}"
+export MAP_SIM_WORLD="${MAP_SIM_WORLD:-marsyard2020_map_only.world}"
 apply_default_spawn_for_world "$MAP_SIM_WORLD"
 apply_default_livox_profile_for_world "$MAP_SIM_WORLD"
 apply_default_lighting_profile_for_world "$MAP_SIM_WORLD"
