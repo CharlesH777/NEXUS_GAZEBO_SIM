@@ -1,0 +1,76 @@
+<?xml version="1.0" ?>
+<sdf version="1.6" xmlns:ignition="https://gazebosim.org/schema">
+  <world name="marsyard2021_map_only">
+    <ignition:model_plugin_loading_timeout>600</ignition:model_plugin_loading_timeout>
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <real_time_factor>1.0</real_time_factor>
+      <gravity>0 0 -9.8</gravity>
+    </physics>
+
+    <scene>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.75 0.75 0.75 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <include>
+      <uri>model://marsyard2021_terrain</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <model name="boundary_walls">
+      <static>true</static>
+      <pose>0 0 0 0 0 0</pose>
+
+      <link name="north_wall">
+        <pose>0 25.2 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>52 0.8 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>52 0.8 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="south_wall">
+        <pose>0 -25.2 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>52 0.8 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>52 0.8 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="east_wall">
+        <pose>25.2 0 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.8 52 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 52 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="west_wall">
+        <pose>-25.2 0 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.8 52 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 52 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

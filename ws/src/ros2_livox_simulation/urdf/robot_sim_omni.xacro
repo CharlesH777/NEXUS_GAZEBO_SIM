@@ -1,0 +1,445 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="cube_robot">
+
+  <xacro:arg name="enable_livox" default="true"/>
+  <xacro:arg name="enable_livox_yaw_follow" default="false"/>
+  <xacro:arg name="enable_depth_camera" default="false"/>
+  <xacro:arg name="enable_imu" default="true"/>
+  <xacro:arg name="enable_tf_pub" default="true"/>
+  <xacro:arg name="tf_pub_publish_nav_odom" default="true"/>
+  <xacro:arg name="tf_pub_publish_legacy_odom" default="true"/>
+  <xacro:arg name="tf_pub_publish_livox_world_pose" default="true"/>
+  <xacro:arg name="depth_camera_name" default="livox_tilt_depth"/>
+  <xacro:arg name="depth_camera_topic_prefix" default="livox/depth"/>
+  <xacro:arg name="depth_camera_frame_name" default="depth_camera_mount_link"/>
+  <xacro:arg name="depth_camera_update_rate" default="60.0"/>
+  <xacro:arg name="depth_camera_width" default="848"/>
+  <xacro:arg name="depth_camera_height" default="480"/>
+  <xacro:arg name="depth_camera_hfov" default="1.5184364"/>
+  <xacro:arg name="depth_camera_near_clip" default="0.10"/>
+  <xacro:arg name="depth_camera_far_clip" default="10.0"/>
+  <xacro:arg name="depth_camera_min_depth" default="0.10"/>
+  <xacro:arg name="depth_camera_max_depth" default="10.0"/>
+  <xacro:arg name="depth_camera_visualize" default="false"/>
+  <xacro:arg name="livox_samples" default="20000"/>
+  <xacro:arg name="livox_downsample" default="1"/>
+  <xacro:arg name="livox_max_range" default="70.0"/>
+
+  <xacro:property name="mass" value="5.0"/>
+  <xacro:property name="size" value="0.4"/>
+  <xacro:property name="body_height" value="${size/2}"/>
+
+  <xacro:property name="wheel_radius" value="0.10"/>
+  <xacro:property name="wheel_thickness" value="0.06"/>
+  <xacro:property name="wheel_separation" value="0.40"/>
+  <xacro:property name="wheelbase" value="0.35"/>
+  <xacro:property name="axle_height" value="${wheel_radius + 0.03}"/>
+  <xacro:property name="steer_pod_radius" value="0.045"/>
+  <xacro:property name="steer_pod_height" value="0.035"/>
+
+  <material name="body_orange">
+    <color rgba="1.0 0.55 0.0 1.0"/>
+  </material>
+
+  <material name="pod_grey">
+    <color rgba="0.55 0.55 0.55 1.0"/>
+  </material>
+
+  <material name="wheel_dark_grey">
+    <color rgba="0.20 0.20 0.20 1.0"/>
+  </material>
+
+  <link name="base_footprint"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${axle_height}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${body_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${size} ${size} ${body_height}"/>
+      </geometry>
+      <material name="body_orange"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 ${body_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${size} ${size} ${body_height}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <origin xyz="0 0 ${body_height/2}" rpy="0 0 0"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="0.02" iyy="0.02" izz="0.02"
+        ixy="0.0" ixz="0.0" iyz="0.0"/>
+    </inertial>
+  </link>
+
+  <xacro:macro name="swerve_pod_link" params="name">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="${steer_pod_radius}" length="${steer_pod_height}"/>
+        </geometry>
+        <material name="pod_grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="${steer_pod_radius}" length="${steer_pod_height}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.25"/>
+        <inertia
+          ixx="0.0006" iyy="0.0006" izz="0.0006"
+          ixy="0.0" ixz="0.0" iyz="0.0"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="wheel_link" params="name">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+        <material name="wheel_dark_grey"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.30"/>
+        <inertia
+          ixx="0.001" iyy="0.001" izz="0.001"
+          ixy="0.0" ixz="0.0" iyz="0.0"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="swerve_module" params="prefix x y">
+    <xacro:swerve_pod_link name="${prefix}_steer_link"/>
+    <xacro:wheel_link name="${prefix}_wheel"/>
+
+    <joint name="${prefix}_steer_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_steer_link"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <dynamics damping="0.9" friction="0.08"/>
+    </joint>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="${prefix}_steer_link"/>
+      <child link="${prefix}_wheel"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <dynamics damping="0.15" friction="0.04"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:swerve_module prefix="left_front"
+                       x="${wheelbase/2}" y="${wheel_separation/2}"/>
+  <xacro:swerve_module prefix="right_front"
+                       x="${wheelbase/2}" y="-${wheel_separation/2}"/>
+  <xacro:swerve_module prefix="left_rear"
+                       x="-${wheelbase/2}" y="${wheel_separation/2}"/>
+  <xacro:swerve_module prefix="right_rear"
+                       x="-${wheelbase/2}" y="-${wheel_separation/2}"/>
+
+  <gazebo reference="left_front_wheel">
+    <mu1>2.8</mu1>
+    <mu2>2.8</mu2>
+    <slip1>0.01</slip1>
+    <slip2>0.01</slip2>
+  </gazebo>
+  <gazebo reference="right_front_wheel">
+    <mu1>2.8</mu1>
+    <mu2>2.8</mu2>
+    <slip1>0.01</slip1>
+    <slip2>0.01</slip2>
+  </gazebo>
+  <gazebo reference="left_rear_wheel">
+    <mu1>2.8</mu1>
+    <mu2>2.8</mu2>
+    <slip1>0.01</slip1>
+    <slip2>0.01</slip2>
+  </gazebo>
+  <gazebo reference="right_rear_wheel">
+    <mu1>2.8</mu1>
+    <mu2>2.8</mu2>
+    <slip1>0.01</slip1>
+    <slip2>0.01</slip2>
+  </gazebo>
+
+  <link name="depth_camera_mount_link"/>
+  <joint name="depth_camera_mount_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="depth_camera_mount_link"/>
+    <origin xyz="0 0 ${size}" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:include filename="$(find ros2_livox_simulation)/urdf/mid360.xacro"/>
+  <xacro:include filename="$(find ros2_livox_simulation)/urdf/depth_camera_gazebo.xacro"/>
+
+  <xacro:if value="$(arg enable_livox_yaw_follow)">
+    <link name="livox_yaw_link">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.02"/>
+        <inertia ixx="1e-5" iyy="1e-5" izz="1e-5"
+                 ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+
+    <joint name="livox_yaw_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="livox_yaw_link"/>
+      <origin xyz="0 0 ${size}" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <dynamics damping="0.25" friction="0.02"/>
+    </joint>
+
+    <link name="livox_mount_link"/>
+    <joint name="livox_mount_joint" type="fixed">
+      <parent link="livox_yaw_link"/>
+      <child link="livox_mount_link"/>
+      <origin xyz="0 0 0" rpy="0 0.523599 0"/>
+    </joint>
+
+    <xacro:if value="$(arg enable_livox)">
+      <xacro:mid360
+        name="livox"
+        parent="livox_mount_link"
+        topic="livox/lidar"
+        samples="$(arg livox_samples)"
+        downsample="$(arg livox_downsample)"
+        max_range="$(arg livox_max_range)">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </xacro:mid360>
+    </xacro:if>
+  </xacro:if>
+
+  <xacro:unless value="$(arg enable_livox_yaw_follow)">
+    <link name="livox_mount_link"/>
+    <joint name="livox_mount_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="livox_mount_link"/>
+      <origin xyz="0 0 ${size}" rpy="0 0.523599 0"/>
+    </joint>
+
+    <xacro:if value="$(arg enable_livox)">
+      <xacro:mid360
+        name="livox"
+        parent="livox_mount_link"
+        topic="livox/lidar"
+        samples="$(arg livox_samples)"
+        downsample="$(arg livox_downsample)"
+        max_range="$(arg livox_max_range)">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </xacro:mid360>
+    </xacro:if>
+  </xacro:unless>
+
+  <xacro:if value="$(arg enable_depth_camera)">
+    <xacro:gazebo_depth_camera
+      name="$(arg depth_camera_name)"
+      parent="depth_camera_mount_link"
+      topic_prefix="$(arg depth_camera_topic_prefix)"
+      frame_name="$(arg depth_camera_frame_name)"
+      update_rate="$(arg depth_camera_update_rate)"
+      width="$(arg depth_camera_width)"
+      height="$(arg depth_camera_height)"
+      hfov="$(arg depth_camera_hfov)"
+      near_clip="$(arg depth_camera_near_clip)"
+      far_clip="$(arg depth_camera_far_clip)"
+      min_depth="$(arg depth_camera_min_depth)"
+      max_depth="$(arg depth_camera_max_depth)"
+      visualize="$(arg depth_camera_visualize)">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:gazebo_depth_camera>
+  </xacro:if>
+
+  <xacro:property name="imu_x" value="0.006253"/>
+  <xacro:property name="imu_y" value="-0.011775"/>
+  <xacro:property name="imu_z" value="0.007645"/>
+
+  <xacro:if value="$(arg enable_imu)">
+    <link name="imu_link">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="1e-5" iyy="1e-5" izz="1e-5"
+                 ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+
+    <joint name="imu_joint" type="fixed">
+      <parent link="livox_mount_link"/>
+      <child link="imu_link"/>
+      <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="imu_link">
+      <sensor name="imu_sensor" type="imu">
+        <always_on>true</always_on>
+        <update_rate>200.0</update_rate>
+        <imu>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.0002</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.0002</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.0002</stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01</stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
+
+        <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+          <ros>
+            <namespace>/</namespace>
+            <remapping>~/out:=/livox/imu</remapping>
+          </ros>
+          <frame_name>imu_link</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+
+  <ros2_control name="GazeboSystem" type="system">
+    <hardware>
+      <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+    </hardware>
+
+    <joint name="left_front_steer_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_front_steer_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="left_rear_steer_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_rear_steer_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="left_front_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_front_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="left_rear_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_rear_wheel_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <xacro:if value="$(arg enable_livox_yaw_follow)">
+      <joint name="livox_yaw_joint">
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+    </xacro:if>
+  </ros2_control>
+
+  <gazebo>
+    <plugin name="gazebo_ros2_control"
+            filename="libgazebo_ros2_control.so">
+      <robot_param>robot_description</robot_param>
+      <robot_param_node>robot_state_publisher</robot_param_node>
+      <parameters>$(find ros2_livox_simulation)/config/cube_rob_omni_ctrl.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <xacro:if value="$(arg enable_tf_pub)">
+    <gazebo>
+      <plugin name="tf_pub" filename="libtf_pub.so">
+        <expected_model_name>cube_robot</expected_model_name>
+        <publish_nav_odom>$(arg tf_pub_publish_nav_odom)</publish_nav_odom>
+        <publish_legacy_odom>$(arg tf_pub_publish_legacy_odom)</publish_legacy_odom>
+        <nav_odom_topic>/nav_odom</nav_odom_topic>
+        <legacy_odom_topic>/odom</legacy_odom_topic>
+        <enable_livox_yaw_follow>$(arg enable_livox_yaw_follow)</enable_livox_yaw_follow>
+        <publish_livox_world_pose>$(arg tf_pub_publish_livox_world_pose)</publish_livox_world_pose>
+        <livox_fixed_pitch_deg>-30.0</livox_fixed_pitch_deg>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+</robot>

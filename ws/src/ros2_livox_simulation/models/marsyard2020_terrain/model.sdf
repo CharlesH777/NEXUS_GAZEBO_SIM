@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="marsyard2020_terrain">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+    <link name="marsyard_terrain">
+      <pose>0.046281 0.023338 0.30666 1.5708 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://marsyard2020_terrain/meshes/terrain_compressed.obj</uri>
+          </mesh>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://marsyard2020_terrain/meshes/terrain_compressed.obj</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.45 0.45 0.45 1</ambient>
+          <diffuse>0.60 0.60 0.60 1</diffuse>
+          <specular>0.05 0.05 0.05 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

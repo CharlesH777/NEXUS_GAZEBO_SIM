@@ -1,0 +1,26 @@
+# ROS / colcon build artifacts
+ws/build/
+ws/install/
+ws/log/
+ws/.external_worlds/
+ws/.fuel_models/
+
+# Local runtime logs
+run_*.log
+verify_*.log
+frames_*.gv
+frames_*.pdf
+
+# Python
+__pycache__/
+*.pyc
+*.pid
+
+# macOS
+.DS_Store
+
+# Editor caches
+.vscode/
+**/.vscode/
+**/*.db-shm
+**/*.db-wal

@@ -1,0 +1,100 @@
+<?xml version="1.0" ?>
+<sdf version="1.6" xmlns:ignition="https://gazebosim.org/schema">
+
+  <world name="rm_2026_slam_world">
+    <ignition:model_plugin_loading_timeout>600</ignition:model_plugin_loading_timeout>
+
+    <!-- ============================== -->
+    <!-- 物理引擎 -->
+    <!-- ============================== -->
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <real_time_factor>1.0</real_time_factor>
+      <gravity>0 0 -9.8</gravity>
+    </physics>
+
+    <!-- ============================== -->
+    <!-- 场景 -->
+    <!-- ============================== -->
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- ============================== -->
+    <!-- 光照 -->
+    <!-- ============================== -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- ============================== -->
+    <!-- 地面 -->
+    <!-- ============================== -->
+    <include>
+      <uri>model://ground_plane</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <!-- ============================== -->
+    <!-- 你的地图 -->
+    <!-- ============================== -->
+    <include>
+      <uri>model://rm_2026</uri>
+      <pose>-1 -4 0 0 0 0</pose>
+    </include>
+
+    <model name="boundary_walls">
+      <static>true</static>
+      <pose>0 0 0 0 0 0</pose>
+
+      <link name="north_wall">
+        <pose>14 16 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>36 0.8 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>36 0.8 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="south_wall">
+        <pose>14 -8 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>36 0.8 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>36 0.8 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="east_wall">
+        <pose>31 4 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.8 25 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 25 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="west_wall">
+        <pose>-3 4 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.8 25 2.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 25 2.0</size></box></geometry>
+          <material><ambient>0.85 0.15 0.15 0.50</ambient><diffuse>0.90 0.20 0.20 0.50</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+
+</sdf>

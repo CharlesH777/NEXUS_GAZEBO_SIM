@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro
+    name="gazebo_depth_camera"
+    params="
+      name
+      parent:=base_link
+      topic_prefix:='livox/depth'
+      update_rate:='60.0'
+      width:='848'
+      height:='480'
+      hfov:='1.5184364'
+      near_clip:='0.10'
+      far_clip:='10.0'
+      min_depth:='0.10'
+      max_depth:='10.0'
+      visualize:='false'
+      frame_name:='depth_camera_mount_link'
+      *origin">
+
+    <link name="${name}_link">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.02"/>
+        <inertia ixx="1e-5" iyy="1e-5" izz="1e-5"
+                 ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+
+    <!-- Keep the camera model completely invisible in Gazebo; only publish topics. -->
+    <gazebo reference="${name}_link">
+      <visualize>false</visualize>
+    </gazebo>
+
+    <joint name="${name}_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${name}_link"/>
+      <xacro:insert_block name="origin"/>
+    </joint>
+
+    <gazebo reference="${name}_link">
+      <sensor name="${name}_sensor" type="depth">
+        <always_on>true</always_on>
+        <update_rate>${update_rate}</update_rate>
+        <visualize>false</visualize>
+        <camera name="${name}">
+          <horizontal_fov>${hfov}</horizontal_fov>
+          <image>
+            <width>${width}</width>
+            <height>${height}</height>
+            <format>B8G8R8</format>
+          </image>
+          <depth_camera/>
+          <clip>
+            <near>${near_clip}</near>
+            <far>${far_clip}</far>
+          </clip>
+        </camera>
+        <plugin name="${name}_controller" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>/</namespace>
+            <remapping>${name}/image_raw:=/${topic_prefix}/image_raw</remapping>
+            <remapping>${name}/camera_info:=/${topic_prefix}/camera_info</remapping>
+            <remapping>${name}/depth/image_raw:=/${topic_prefix}/depth/image_raw</remapping>
+            <remapping>${name}/depth/camera_info:=/${topic_prefix}/depth/camera_info</remapping>
+            <remapping>${name}/points:=/${topic_prefix}/points</remapping>
+          </ros>
+          <camera_name>${name}</camera_name>
+          <frame_name>${frame_name}</frame_name>
+          <min_depth>${min_depth}</min_depth>
+          <max_depth>${max_depth}</max_depth>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+</robot>
