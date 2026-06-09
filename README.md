@@ -9,6 +9,9 @@
   - Livox 雷达
   - IMU
   - 深度相机接口定义
+- 保留可视化链路
+  - Gazebo GUI
+  - RViz
 - 去掉导航、FastLIO、FastLIVO 等上层栈
 - 让外部算法、控制器、感知模块更容易直接接进来
 
@@ -45,11 +48,12 @@
 
 ## 2. 推荐理解方式
 
-把整个系统分成 5 层最容易理解：
+把整个系统分成 6 层最容易理解：
 
 1. 入口脚本层
    - `build_local.sh`
    - `run_sim_local.sh`
+   - `run_sim_local_gui.sh`
    - `run_sim_local_omni.sh`
    - `run_sim_local_camera.sh`
    - `open_depth_camera.sh`
@@ -70,7 +74,10 @@
    - `ws/src/ros2_livox_simulation/src/livox_points_plugin.cpp`
    - `ws/src/ros2_livox_simulation/src/tf_pub.cpp`
 
-5. 外部接入层
+5. 可视化配置层
+   - `ws/src/ros2_livox_simulation/config/nexus_gazebo_sim.rviz`
+
+6. 外部接入层
    - 你的控制器、规划器、定位器、感知节点
    - 它们通过 topic / TF / odom / spawn service 接进来
 
@@ -98,6 +105,10 @@
   - 编译仿真工作区
 - `run_sim_local.sh`
   - 总入口，负责环境清理、默认参数、地图选择、启动 launch
+- `run_sim_local_gui.sh`
+  - 显式 GUI 入口
+  - 强制打开 `gzclient`
+  - 默认同时打开 RViz
 - `run_sim_local_omni.sh`
   - 显式选择 omni/swerve 版本的快捷入口
 - `run_sim_local_camera.sh`
@@ -128,6 +139,7 @@ sim_launch_omni.py
   -> 设置 GAZEBO_MODEL_PATH / GAZEBO_PLUGIN_PATH
   -> xacro 展开 robot_sim_omni.xacro
   -> 启动 gzserver / gzclient
+  -> 如果启用可视化，则启动 rviz2 并加载 bare 版 RViz 配置
   -> 启动 robot_state_publisher
   -> 调用 spawn_entity.py 生成 cube_robot
   -> 拉起控制器、/cmd_vel 桥、IMU 整理节点
@@ -282,6 +294,19 @@ MAP_SIM_ENABLE_DEPTH_CAMERA=1
 MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1
 ```
 
+#### G. 自动处理 RViz 默认值
+
+现在默认策略是：
+
+- 只要 `MAP_SIM_GZCLIENT=1`
+- 就默认 `MAP_SIM_ENABLE_RVIZ=1`
+
+也就是说：
+
+- 主入口 `bash ./run_sim_local.sh` 在桌面环境里会默认打开 Gazebo GUI + RViz
+- 如果你只想开 Gazebo，不想开 RViz，可以手动设 `MAP_SIM_ENABLE_RVIZ=0`
+- 如果你是 headless，`MAP_SIM_GZCLIENT=0` 时 RViz 也会默认关闭
+
 ### 6.4 最终传给 launch 的核心参数
 
 `run_sim_local.sh` 最终会把这些参数传给 launch：
@@ -297,6 +322,8 @@ MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1
 - `enable_depth_camera`
 - `enable_imu`
 - `enable_tf_pub`
+- `enable_rviz`
+- `rviz_config`
 - `lighting_preset`
 - `lighting_brightness`
 - `solar_time`
@@ -314,7 +341,7 @@ MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1
 
 ## 7. 推荐运行模式
 
-### 7.1 默认推荐：omni bare 版本
+### 7.1 默认推荐：GUI + RViz bare 主链
 
 这是现在最推荐、最完整、最稳定的路径：
 
@@ -322,13 +349,25 @@ MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1
 bash ./run_sim_local.sh
 ```
 
-或者显式：
+如果你想显式表达“我要 GUI 版 bare 仿真”，也可以直接：
 
 ```bash
-bash ./run_sim_local_omni.sh
+bash ./run_sim_local_gui.sh
 ```
 
-### 7.2 推荐 headless 验证
+这两条命令在当前默认配置下都会拉起：
+
+- `gzserver`
+- `gzclient`
+- `rviz2`
+
+### 7.2 只开 Gazebo GUI，不开 RViz
+
+```bash
+MAP_SIM_ENABLE_RVIZ=0 bash ./run_sim_local.sh
+```
+
+### 7.3 推荐 headless 验证
 
 如果只是验证系统能不能跑，最稳的是：
 
@@ -336,7 +375,7 @@ bash ./run_sim_local_omni.sh
 MAP_SIM_GZCLIENT=0 bash ./run_sim_local.sh
 ```
 
-### 7.3 classic / legacy 版本
+### 7.4 classic / legacy 版本
 
 根脚本仍保留：
 
@@ -379,10 +418,11 @@ MAP_SIM_BASE_VARIANT=classic
 6. 组装 `GAZEBO_PLUGIN_PATH`
 7. 启动 `gzserver`
 8. 如果 GUI 开启，再启动 `gzclient`
-9. 如果允许 solar panel，再延迟起 `solar_time_panel`
-10. 启动 `robot_state_publisher`
-11. 当 `robot_state_publisher` 启动后，调用 `spawn_entity.py`
-12. 当 `spawn_entity.py` 成功退出后，再启动：
+9. 如果 `enable_rviz=1`，解析 RViz 配置并启动 `rviz2`
+10. 如果允许 solar panel，再延迟起 `solar_time_panel`
+11. 启动 `robot_state_publisher`
+12. 当 `robot_state_publisher` 启动后，调用 `spawn_entity.py`
+13. 当 `spawn_entity.py` 成功退出后，再启动：
     - `spawn_omni_controllers`
     - `cmd_vel_to_swerve`
     - `fix_imu_time`（如果 IMU 开启）
@@ -393,7 +433,29 @@ MAP_SIM_BASE_VARIANT=classic
 - `robot_description` 还没准备好就调用 spawn
 - `/controller_manager` 还没出现就去配置控制器
 
-### 8.2 Launch 事件顺序的核心思想
+### 8.2 RViz 是怎么接进主链的
+
+当前 RViz 不是 shell 层随便再开一个窗口，而是由 launch 层正式托管。
+
+这样做的好处是：
+
+- 生命周期跟仿真主链一致
+- `use_sim_time` 能统一继承
+- 可以用 `MAP_SIM_RVIZ_CONFIG` 或 launch 参数 `rviz_config:=...` 替换自己的显示布局
+- 以后如果你想接别的可视化节点，也可以按同样方式挂进去
+
+默认 RViz 配置文件是：
+
+- `ws/src/ros2_livox_simulation/config/nexus_gazebo_sim.rviz`
+
+它当前主要展示：
+
+- `RobotModel`
+- `TF`
+- `/livox/lidar_PointCloud2`
+- 预留但默认关闭的 `/livox/depth/points`
+
+### 8.3 Launch 事件顺序的核心思想
 
 它不是“所有节点一口气并发起”，而是：
 
@@ -966,7 +1028,31 @@ rclpy.spin(node)
 
 ---
 
-### 16.2 接你自己的低层底盘控制器
+### 16.2 接你自己的可视化或调试界面
+
+最简单的接法不是改代码，而是直接替换 RViz 配置：
+
+```bash
+MAP_SIM_RVIZ_CONFIG=/abs/path/to/your_config.rviz bash ./run_sim_local.sh
+```
+
+这样适合这些情况：
+
+- 你想加自己的 Marker / Path / OccupancyGrid 显示
+- 你想把 fixed frame 改成 `odom`
+- 你想加入自己的相机、检测框、轨迹或调试 topic
+
+如果你要把别的 GUI 工具挂进主链，推荐做法是：
+
+1. 复制 `sim_launch_omni.py`
+2. 在 launch 里增加你的 Node
+3. 保留原有 `gzserver` / `gzclient` / `rviz2` / 控制器启动顺序
+
+这样接入最干净，也最不容易和 shell 层环境变量打架。
+
+---
+
+### 16.3 接你自己的低层底盘控制器
 
 如果你要做的是：
 
@@ -987,7 +1073,7 @@ rclpy.spin(node)
 
 ---
 
-### 16.3 接 SLAM / 里程计 / 点云感知
+### 16.4 接 SLAM / 里程计 / 点云感知
 
 最常见的接法：
 
@@ -1007,7 +1093,7 @@ rclpy.spin(node)
 
 ---
 
-### 16.4 接需要真值位姿的算法
+### 16.5 接需要真值位姿的算法
 
 如果你需要：
 
@@ -1039,7 +1125,7 @@ MAP_SIM_ENABLE_TF_PUB=1 bash ./run_sim_local.sh
 
 ---
 
-### 16.5 接你自己的相机算法
+### 16.6 接你自己的相机算法
 
 当前建议分两种理解。
 
@@ -1070,7 +1156,7 @@ MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1 bash ./run_sim_local_camera.sh
 
 ---
 
-### 16.6 接你自己的世界 / 模型
+### 16.7 接你自己的世界 / 模型
 
 有两种常见接法。
 
@@ -1094,7 +1180,7 @@ Launch 层会把它拼进 `GAZEBO_MODEL_PATH`。
 
 ---
 
-### 16.7 接运行时动态实体
+### 16.8 接运行时动态实体
 
 如果你要在仿真跑起来之后再加东西：
 
@@ -1243,37 +1329,55 @@ Launch 层会把它拼进 `GAZEBO_MODEL_PATH`。
 bash ./build_local.sh
 ```
 
-### 19.2 启动推荐 bare 主链
+### 19.2 启动推荐 bare 主链（Gazebo GUI + RViz）
 
 ```bash
 bash ./run_sim_local.sh
 ```
 
-### 19.3 启动 headless
+### 19.3 显式启动 GUI 快捷入口
+
+```bash
+bash ./run_sim_local_gui.sh
+```
+
+### 19.4 启动 headless
 
 ```bash
 MAP_SIM_GZCLIENT=0 bash ./run_sim_local.sh
 ```
 
-### 19.4 选择 cave 场景
+### 19.5 只开 Gazebo，不开 RViz
+
+```bash
+MAP_SIM_ENABLE_RVIZ=0 bash ./run_sim_local.sh
+```
+
+### 19.6 选择 cave 场景
 
 ```bash
 bash ./run_sim_local.sh cave
 ```
 
-### 19.5 启用 TF / odom 输出
+### 19.7 启用 TF / odom 输出
 
 ```bash
 MAP_SIM_ENABLE_TF_PUB=1 bash ./run_sim_local.sh
 ```
 
-### 19.6 清理仿真残留
+### 19.8 使用自定义 RViz 配置
+
+```bash
+MAP_SIM_RVIZ_CONFIG=/abs/path/to/your_config.rviz bash ./run_sim_local.sh
+```
+
+### 19.9 清理仿真残留
 
 ```bash
 bash ./runlocal/stop.sh
 ```
 
-### 19.7 查看深度相机运行时状态
+### 19.10 查看深度相机运行时状态
 
 ```bash
 bash ./open_depth_camera.sh --status
@@ -1315,13 +1419,14 @@ bash ./open_depth_camera.sh --status
 
 ## 21. 对接别的系统时的推荐原则
 
-如果你只记 5 条，请记下面这 5 条：
+如果你只记 6 条，请记下面这 6 条：
 
 1. 高层控制优先发 `/cmd_vel`，不要一开始就碰底层舵轮控制器。
 2. 做 SLAM / 感知时优先订阅 `/livox/lidar_PointCloud2` 和 `/imu_fixed`。
 3. 需要真值位姿时再开 `MAP_SIM_ENABLE_TF_PUB=1`。
-4. 要做机器人结构或传感器布局改动，优先改 `robot_sim_omni.xacro`。
-5. 要替换整个控制逻辑，优先改 `sim_launch_omni.py` 和 `cmd_vel_to_swerve.py`，不要在外面和默认桥接节点抢同一控制器。
+4. 要改默认可视化，优先换 `MAP_SIM_RVIZ_CONFIG`，再考虑改 launch。
+5. 要做机器人结构或传感器布局改动，优先改 `robot_sim_omni.xacro`。
+6. 要替换整个控制逻辑，优先改 `sim_launch_omni.py` 和 `cmd_vel_to_swerve.py`，不要在外面和默认桥接节点抢同一控制器。
 
 ---
 
@@ -1332,6 +1437,11 @@ bash ./open_depth_camera.sh --status
 - `build_local.sh` 可完成构建
 - `run_sim_local.sh` 可拉起 bare 主链
 - 车体和环境能正常运行
+- `run_sim_local.sh` 当前默认可拉起 Gazebo GUI + RViz
+- `run_sim_local_gui.sh` 可显式拉起 Gazebo GUI + RViz
+- `gzclient` 可正常启动
+- `rviz2` 可正常启动
+- `map_sim_rviz` 节点可进入 ROS graph
 - `/livox/lidar` 正常
 - `/livox/lidar_PointCloud2` 正常
 - `/livox/imu` 正常
@@ -1339,6 +1449,7 @@ bash ./open_depth_camera.sh --status
 - `/joint_states` 正常
 - `/dynamic_joint_states` 正常
 - omni 控制器可成功进入 active
+- `/cmd_vel` 可被内部桥接成非零的转向和轮速控制命令
 
 当前未作为稳定主链开放：
 
@@ -1350,7 +1461,7 @@ bash ./open_depth_camera.sh --status
 
 这份 `NEXUS_GAZEBO_SIM` 现在最适合被当成：
 
-> 一个只保留车、环境、控制桥和传感器接口的 Gazebo 仿真底座。
+> 一个保留车、环境、Gazebo GUI、RViz、控制桥和传感器接口的 Gazebo 仿真底座。
 
 如果你要接自己的：
 

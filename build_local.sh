@@ -64,6 +64,7 @@ ros2 pkg prefix ros2_livox_simulation >/dev/null
 
 echo "[OK] Build finished and livox_ros_driver2 / ros2_livox_simulation are discoverable"
 echo "[NEXT] Run the minimal sim: bash ./run_sim_local.sh"
+echo "[NEXT] Run the Gazebo GUI + RViz view: bash ./run_sim_local_gui.sh"
 echo "[NEXT] Run the omni variant explicitly: bash ./run_sim_local_omni.sh"
 echo "[NEXT] Depth camera support is preserved but gated because Gazebo Classic crashes"
 echo "[NEXT] when /livox/depth/* is enabled in this environment."

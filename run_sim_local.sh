@@ -183,10 +183,12 @@ export MAP_SIM_ENABLE_LIVOX="${MAP_SIM_ENABLE_LIVOX:-1}"
 export MAP_SIM_ENABLE_DEPTH_CAMERA="${MAP_SIM_ENABLE_DEPTH_CAMERA:-0}"
 export MAP_SIM_ENABLE_IMU="${MAP_SIM_ENABLE_IMU:-1}"
 export MAP_SIM_ENABLE_TF_PUB="${MAP_SIM_ENABLE_TF_PUB:-0}"
+export MAP_SIM_ENABLE_RVIZ="${MAP_SIM_ENABLE_RVIZ:-${MAP_SIM_GZCLIENT}}"
 export MAP_SIM_ENABLE_ROS2_CONTROL="${MAP_SIM_ENABLE_ROS2_CONTROL:-1}"
 export MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA="${MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA:-${MAP_SIM_ALLOW_UNSTABLE_HEADLESS_DEPTH_CAMERA:-0}}"
 export MAP_SIM_LIGHTING_PRESET="${MAP_SIM_LIGHTING_PRESET:-world}"
 export MAP_SIM_LIGHTING_BRIGHTNESS="${MAP_SIM_LIGHTING_BRIGHTNESS:-1.0}"
+export MAP_SIM_RVIZ_CONFIG="${MAP_SIM_RVIZ_CONFIG:-}"
 export MAP_SIM_DEPTH_CAMERA_NAME="${MAP_SIM_DEPTH_CAMERA_NAME:-livox_tilt_depth}"
 export MAP_SIM_DEPTH_CAMERA_TOPIC_PREFIX="${MAP_SIM_DEPTH_CAMERA_TOPIC_PREFIX:-livox/depth}"
 export MAP_SIM_DEPTH_CAMERA_FRAME_NAME="${MAP_SIM_DEPTH_CAMERA_FRAME_NAME:-depth_camera_mount_link}"
@@ -215,6 +217,11 @@ fi
 export MAP_SIM_ENABLE_SOLAR_TIME_PANEL="${MAP_SIM_ENABLE_SOLAR_TIME_PANEL:-1}"
 
 apply_safe_gui_defaults
+
+if [ "${MAP_SIM_ENABLE_RVIZ}" = "1" ] && [ -z "${DISPLAY:-}" ]; then
+  echo "[WARN] MAP_SIM_ENABLE_RVIZ=1 but DISPLAY is empty."
+  echo "[WARN] rviz2 may fail to open unless an X11 / desktop session is available."
+fi
 
 if [ "${MAP_SIM_ENABLE_DEPTH_CAMERA}" = "1" ] \
   && [ "${MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA}" != "1" ]; then
@@ -286,6 +293,7 @@ echo "[INFO] Spawn pose: x=${MAP_SIM_SPAWN_X} y=${MAP_SIM_SPAWN_Y} z=${MAP_SIM_S
 echo "[INFO] Livox sensor: ${MAP_SIM_ENABLE_LIVOX}"
 echo "[INFO] Depth camera: ${MAP_SIM_ENABLE_DEPTH_CAMERA}"
 echo "[INFO] IMU: ${MAP_SIM_ENABLE_IMU}"
+echo "[INFO] RViz: ${MAP_SIM_ENABLE_RVIZ}"
 echo "[INFO] Lighting: preset=${MAP_SIM_LIGHTING_PRESET} brightness=${MAP_SIM_LIGHTING_BRIGHTNESS}"
 if [ -n "${MAP_SIM_SOLAR_TIME}" ]; then
   echo "[INFO] Solar lighting: enabled initial_time=${MAP_SIM_SOLAR_TIME} live_panel=${MAP_SIM_ENABLE_SOLAR_TIME_PANEL}"
@@ -294,23 +302,32 @@ else
 fi
 print_map_menu
 
-exec ros2 launch ros2_livox_simulation "$LAUNCH_FILE" \
-  world_name:="${MAP_SIM_WORLD}" \
-  use_gui:="${MAP_SIM_GZCLIENT}" \
-  enable_headless_rendering:="${MAP_SIM_ENABLE_HEADLESS_RENDERING}" \
-  spawn_robot:="${MAP_SIM_SPAWN_ROBOT}" \
-  spawn_x:="${MAP_SIM_SPAWN_X}" \
-  spawn_y:="${MAP_SIM_SPAWN_Y}" \
-  spawn_z:="${MAP_SIM_SPAWN_Z}" \
-  enable_livox:="${MAP_SIM_ENABLE_LIVOX}" \
-  enable_depth_camera:="${MAP_SIM_ENABLE_DEPTH_CAMERA}" \
-  enable_imu:="${MAP_SIM_ENABLE_IMU}" \
-  enable_tf_pub:="${MAP_SIM_ENABLE_TF_PUB}" \
-  lighting_preset:="${MAP_SIM_LIGHTING_PRESET}" \
-  lighting_brightness:="${MAP_SIM_LIGHTING_BRIGHTNESS}" \
-  solar_time:="${MAP_SIM_SOLAR_TIME}" \
-  enable_solar_time_panel:="${MAP_SIM_ENABLE_SOLAR_TIME_PANEL}" \
-  livox_samples:="${MAP_SIM_LIVOX_SAMPLES}" \
-  livox_downsample:="${MAP_SIM_LIVOX_DOWNSAMPLE}" \
-  livox_max_range:="${MAP_SIM_LIVOX_MAX_RANGE}" \
-  "${EXTRA_ARGS[@]}"
+LAUNCH_ARGS=(
+  "world_name:=${MAP_SIM_WORLD}"
+  "use_gui:=${MAP_SIM_GZCLIENT}"
+  "enable_headless_rendering:=${MAP_SIM_ENABLE_HEADLESS_RENDERING}"
+  "spawn_robot:=${MAP_SIM_SPAWN_ROBOT}"
+  "spawn_x:=${MAP_SIM_SPAWN_X}"
+  "spawn_y:=${MAP_SIM_SPAWN_Y}"
+  "spawn_z:=${MAP_SIM_SPAWN_Z}"
+  "enable_livox:=${MAP_SIM_ENABLE_LIVOX}"
+  "enable_depth_camera:=${MAP_SIM_ENABLE_DEPTH_CAMERA}"
+  "enable_imu:=${MAP_SIM_ENABLE_IMU}"
+  "enable_tf_pub:=${MAP_SIM_ENABLE_TF_PUB}"
+  "enable_rviz:=${MAP_SIM_ENABLE_RVIZ}"
+  "lighting_preset:=${MAP_SIM_LIGHTING_PRESET}"
+  "lighting_brightness:=${MAP_SIM_LIGHTING_BRIGHTNESS}"
+  "solar_time:=${MAP_SIM_SOLAR_TIME}"
+  "enable_solar_time_panel:=${MAP_SIM_ENABLE_SOLAR_TIME_PANEL}"
+  "livox_samples:=${MAP_SIM_LIVOX_SAMPLES}"
+  "livox_downsample:=${MAP_SIM_LIVOX_DOWNSAMPLE}"
+  "livox_max_range:=${MAP_SIM_LIVOX_MAX_RANGE}"
+)
+
+if [ -n "${MAP_SIM_RVIZ_CONFIG}" ]; then
+  LAUNCH_ARGS+=("rviz_config:=${MAP_SIM_RVIZ_CONFIG}")
+fi
+
+LAUNCH_ARGS+=("${EXTRA_ARGS[@]}")
+
+exec ros2 launch ros2_livox_simulation "$LAUNCH_FILE" "${LAUNCH_ARGS[@]}"

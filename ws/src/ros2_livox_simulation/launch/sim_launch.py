@@ -60,6 +60,20 @@ def _resolve_world_path(world_name: str, pkg_share: str, livox_root: str) -> str
     raise RuntimeError(f"Cannot resolve world file: {world_name}")
 
 
+def _resolve_rviz_config_path(rviz_config: str, pkg_share: str) -> str:
+    if not (rviz_config or "").strip():
+        candidate = os.path.join(pkg_share, "config", "nexus_gazebo_sim.rviz")
+    elif os.path.isabs(rviz_config):
+        candidate = rviz_config
+    else:
+        candidate = os.path.join(pkg_share, "config", rviz_config)
+
+    if os.path.exists(candidate):
+        return candidate
+
+    raise RuntimeError(f"Cannot resolve RViz config file: {rviz_config or candidate}")
+
+
 def _join_existing(paths: list[str]) -> str:
     seen: list[str] = []
     for entry in paths:
@@ -103,6 +117,11 @@ def _launch_setup(context):
     enable_tf_pub = _is_true(LaunchConfiguration("enable_tf_pub").perform(context))
     enable_ros2_control = _is_true(
         LaunchConfiguration("enable_ros2_control").perform(context)
+    )
+    enable_rviz = _is_true(LaunchConfiguration("enable_rviz").perform(context))
+    rviz_config_path = _resolve_rviz_config_path(
+        LaunchConfiguration("rviz_config").perform(context),
+        pkg_share,
     )
 
     world_path = maybe_prepare_world_with_lighting(
@@ -210,6 +229,21 @@ def _launch_setup(context):
 
     if launch_gzclient:
         actions.append(ExecuteProcess(cmd=["gzclient"], output="screen"))
+
+    if enable_rviz:
+        actions.extend(
+            [
+                LogInfo(msg=f"[INFO] rviz_config={rviz_config_path}"),
+                Node(
+                    package="rviz2",
+                    executable="rviz2",
+                    name="map_sim_rviz",
+                    output="screen",
+                    arguments=["-d", rviz_config_path],
+                    parameters=[{"use_sim_time": True}],
+                ),
+            ]
+        )
 
     if solar_lighting_enabled and enable_solar_time_panel and launch_gzclient:
         actions.append(
@@ -403,6 +437,16 @@ def generate_launch_description():
                 "enable_tf_pub",
                 default_value=os.getenv("MAP_SIM_ENABLE_TF_PUB", "0"),
                 description="Whether to publish the Gazebo world-pose / odom TF plugin.",
+            ),
+            DeclareLaunchArgument(
+                "enable_rviz",
+                default_value=os.getenv("MAP_SIM_ENABLE_RVIZ", "0"),
+                description="Whether to launch rviz2 with the bare-sim visualization config.",
+            ),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value=os.getenv("MAP_SIM_RVIZ_CONFIG", ""),
+                description="Absolute path or share/config-relative RViz config file.",
             ),
             DeclareLaunchArgument(
                 "livox_samples",
