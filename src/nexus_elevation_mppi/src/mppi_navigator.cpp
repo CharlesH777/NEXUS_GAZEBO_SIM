@@ -430,6 +430,7 @@ private:
     declare_parameter("goal_heading_weight", 1.5);
     declare_parameter("goal_heading_activation_distance", 0.25);
     declare_parameter("path_distance_weight", 1.5);
+    declare_parameter("path_align_weight", 1.5);
     declare_parameter("path_follow_offset", 6);
     declare_parameter("path_follow_threshold_to_goal", 1.4);
     declare_parameter("control_effort_weight", 0.05);
@@ -510,6 +511,7 @@ private:
     goal_heading_activation_distance_ =
       std::max(1e-3, get_parameter("goal_heading_activation_distance").as_double());
     path_distance_weight_ = std::max(0.0, get_parameter("path_distance_weight").as_double());
+    path_align_weight_ = std::max(0.0, get_parameter("path_align_weight").as_double());
     path_follow_offset_ = std::max(0, static_cast<int>(get_parameter("path_follow_offset").as_int()));
     path_follow_threshold_to_goal_ =
       std::max(0.0, get_parameter("path_follow_threshold_to_goal").as_double());
@@ -1304,14 +1306,23 @@ private:
     bool failed = false;
 
     for (int iteration = 0; iteration < iteration_count_; ++iteration) {
+      // Noise decay: each subsequent iteration explores less, exploiting
+      // the refined nominal from the previous iteration.  This lets
+      // iteration_count>1 actually improve quality rather than just
+      // re-sampling with the same variance.
+      const double noise_decay = std::pow(0.5, static_cast<double>(iteration));
+      const double vx_noise = vx_std_ * noise_decay;
+      const double vy_noise = vy_std_ * noise_decay;
+      const double wz_noise = wz_std_ * noise_decay;
+
       std::vector<Control> candidates(static_cast<size_t>(batch_size_ * time_steps_));
       for (int b = 0; b < batch_size_; ++b) {
         for (int t = 0; t < time_steps_; ++t) {
           const Control base = nominal[static_cast<size_t>(t)];
           candidates[idx2(static_cast<size_t>(b), static_cast<size_t>(t), time_steps_)] = Control{
-            static_cast<float>(base.vx + vx_std_ * normal_dist_(rng_)),
-            static_cast<float>(base.vy + vy_std_ * normal_dist_(rng_)),
-            static_cast<float>(base.wz + wz_std_ * normal_dist_(rng_))};
+            static_cast<float>(base.vx + vx_noise * normal_dist_(rng_)),
+            static_cast<float>(base.vy + vy_noise * normal_dist_(rng_)),
+            static_cast<float>(base.wz + wz_noise * normal_dist_(rng_))};
         }
       }
       applyControlConstraints(
@@ -1475,6 +1486,9 @@ private:
     const int rows = batched ? batch_size_ : 1;
     const int cols = batched ? time_steps_ : static_cast<int>(controls.size());
     std::vector<Pose2> trajectories(static_cast<size_t>(rows * cols));
+    // Midpoint (RK2) integration — more accurate than Euler for the 56-step
+    // horizon, especially when yaw changes significantly over the trajectory.
+    const double half_dt = 0.5 * model_dt_;
     for (int row = 0; row < rows; ++row) {
       double x = state.x;
       double y = state.y;
@@ -1483,8 +1497,15 @@ private:
         const auto & c = controls[idx2(static_cast<size_t>(row), static_cast<size_t>(step), cols)];
         const double cos_yaw = std::cos(yaw);
         const double sin_yaw = std::sin(yaw);
-        x += (c.vx * cos_yaw - c.vy * sin_yaw) * model_dt_;
-        y += (c.vx * sin_yaw + c.vy * cos_yaw) * model_dt_;
+        // Half-step position update using current heading
+        const double x_mid = x + (c.vx * cos_yaw - c.vy * sin_yaw) * half_dt;
+        const double y_mid = y + (c.vx * sin_yaw + c.vy * cos_yaw) * half_dt;
+        const double yaw_mid = wrap_angle(yaw + c.wz * half_dt);
+        // Full-step using midpoint heading
+        const double cos_mid = std::cos(yaw_mid);
+        const double sin_mid = std::sin(yaw_mid);
+        x = x + (c.vx * cos_mid - c.vy * sin_mid) * model_dt_;
+        y = y + (c.vx * sin_mid + c.vy * cos_mid) * model_dt_;
         yaw = wrap_angle(yaw + c.wz * model_dt_);
         trajectories[idx2(static_cast<size_t>(row), static_cast<size_t>(step), cols)] =
           Pose2{static_cast<float>(x), static_cast<float>(y), static_cast<float>(yaw)};
@@ -1580,11 +1601,34 @@ private:
       if (!reference_path.empty() && initial_goal_distance > path_follow_threshold_to_goal_) {
         const auto pruned = pruneReferencePath(state, reference_path);
         if (!pruned.empty()) {
+          // Path follow: distance to a point ahead on the path
           const size_t target_index = std::min(
             static_cast<size_t>(path_follow_offset_), pruned.size() - 1U);
           const auto & target = pruned[target_index];
           const double path_distance = std::hypot(final_pose.x - target[0], final_pose.y - target[1]);
           costs[static_cast<size_t>(b)] += static_cast<float>(path_distance_weight_ * path_distance);
+
+          // Path align: perpendicular distance to nearest path segment
+          // (mirrors Nav2 PathAlignCritic — penalizes strafing away from the path)
+          double min_cross_track = std::numeric_limits<double>::infinity();
+          for (size_t i = 0; i + 1U < pruned.size(); ++i) {
+            const double seg_dx = pruned[i + 1U][0] - pruned[i][0];
+            const double seg_dy = pruned[i + 1U][1] - pruned[i][1];
+            const double seg_len2 = seg_dx * seg_dx + seg_dy * seg_dy;
+            if (seg_len2 < 1e-9) {
+              continue;
+            }
+            const double t = std::clamp(
+              ((final_pose.x - pruned[i][0]) * seg_dx + (final_pose.y - pruned[i][1]) * seg_dy) / seg_len2,
+              0.0, 1.0);
+            const double proj_x = pruned[i][0] + t * seg_dx;
+            const double proj_y = pruned[i][1] + t * seg_dy;
+            const double cross_track = std::hypot(final_pose.x - proj_x, final_pose.y - proj_y);
+            min_cross_track = std::min(min_cross_track, cross_track);
+          }
+          if (std::isfinite(min_cross_track)) {
+            costs[static_cast<size_t>(b)] += static_cast<float>(path_align_weight_ * min_cross_track);
+          }
         }
       }
     }
@@ -1622,7 +1666,8 @@ private:
     const size_t fp_count = footprint_offsets_.size();
     for (int b = 0; b < batch_size_; ++b) {
       double total_cost = 0.0;
-      for (int t = 0; t < time_steps_; ++t) {
+      bool early_exit = false;
+      for (int t = 0; t < time_steps_ && !early_exit; ++t) {
         const auto & pose = trajectories[idx2(static_cast<size_t>(b), static_cast<size_t>(t), time_steps_)];
         const double cy = std::cos(pose.yaw);
         const double sy = std::sin(pose.yaw);
@@ -1647,6 +1692,7 @@ private:
                 penalty = std::clamp(1.0f - raw_trav, 0.0f, 1.0f);
                 if (raw_trav <= traversability_stop_threshold_) {
                   (*collision_mask)[static_cast<size_t>(b)] = 1U;
+                  early_exit = true;
                 }
               }
               step_cost_sum += traversability_cost_weight_ * penalty;
@@ -1661,6 +1707,7 @@ private:
             combined_unknown = combined_unknown || sample_unknown;
             if (std::isfinite(trav_value) && trav_value <= traversability_stop_threshold_) {
               (*collision_mask)[static_cast<size_t>(b)] = 1U;
+              early_exit = true;
             }
           }
 
@@ -1674,7 +1721,12 @@ private:
         total_cost += mean_step_cost + unknown_cost_weight_ * unknown_fraction;
         if (unknown_is_obstacle_ && unknown_count > 0) {
           (*collision_mask)[static_cast<size_t>(b)] = 1U;
+          early_exit = true;
         }
+      }
+      // Penalize remaining steps for collided trajectories so they sort lower
+      if (early_exit) {
+        total_cost += static_cast<float>(collision_cost_);
       }
       terrain_cost[static_cast<size_t>(b)] = static_cast<float>(total_cost * model_dt_);
     }
@@ -1809,6 +1861,8 @@ private:
           goal_heading_activation_distance_ = std::max(1e-3, param.as_double());
         } else if (name == "path_distance_weight") {
           path_distance_weight_ = std::max(0.0, param.as_double());
+        } else if (name == "path_align_weight") {
+          path_align_weight_ = std::max(0.0, param.as_double());
         } else if (name == "path_follow_offset") {
           path_follow_offset_ = std::max(0, static_cast<int>(param.as_int()));
         } else if (name == "path_follow_threshold_to_goal") {
@@ -1908,6 +1962,7 @@ private:
   double goal_heading_weight_{1.5};
   double goal_heading_activation_distance_{0.25};
   double path_distance_weight_{1.5};
+  double path_align_weight_{1.5};
   int path_follow_offset_{6};
   double path_follow_threshold_to_goal_{1.4};
   double control_effort_weight_{0.05};
