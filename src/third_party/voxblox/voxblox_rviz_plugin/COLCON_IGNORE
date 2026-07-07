@@ -1,0 +1,1 @@
+This package uses catkin_simple and is excluded from the ROS 2 colcon build.

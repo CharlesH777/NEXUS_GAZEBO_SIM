@@ -1,26 +1,47 @@
-# ROS / colcon build artifacts
-ws/build/
-ws/install/
-ws/log/
-ws/.external_worlds/
-ws/.fuel_models/
+# 构建产物
+build/
+install/
+log/
+CMakeFiles/
+cmake_install.cmake
+/Makefile
+CMakeCache.txt
+__pycache__/
+*.pyc
+*.pyo
+*.pid
+*.log
 
-# Local runtime logs
+# 大型外部依赖
+/tools/Pointcept/
+
+# 运行时产物
+/archive/
+/output/
 run_*.log
 verify_*.log
 frames_*.gv
 frames_*.pdf
 
-# Python
-__pycache__/
-*.pyc
-*.pid
-
-# macOS
-.DS_Store
-
-# Editor caches
+# 编辑器
 .vscode/
 **/.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
 **/*.db-shm
 **/*.db-wal
+
+# Python
+*.egg-info/
+.pytest_cache/
+
+# ROS
+*.bag
+*.db3
+
+# Gazebo
+.gazebo/
+.fuel_models/
+.external_worlds/

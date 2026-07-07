@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>adaptive_obb</name>
+  <version>1.0.0</version>
+  <description>Methods for constructing an Oriented Bounding Box (OBB) that suits the environment</description>
+
+  <maintainer email="magnufh@stud.ntnu.no">Magnus Flaten Lindefjeld</maintainer>
+
+  <license>TODO</license>
+  
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>planner_common</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

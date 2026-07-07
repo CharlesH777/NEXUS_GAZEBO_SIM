@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ELEV_WS_DIR="${MAP_SIM_ELEV_WS_DIR:-/home/charles/NEXUS/tools/elevation_mapping_cupy_ros2_ws}"
+ELEV_WS_DIR="${MAP_SIM_ELEV_WS_DIR:-$ROOT_DIR/tools/elevation_mapping_cupy_ros2_ws}"
 GP_PID=""
 
 cleanup() {

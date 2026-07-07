@@ -1,5 +1,7 @@
 #!/bin/bash
 # LRAE 探索测试脚本 - 长时间监控
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "========================================="
 echo "LRAE 探索长时间监控"
@@ -24,7 +26,7 @@ echo "现在开始持续监控（每30秒检查一次，共10分钟）..."
 echo "========================================="
 echo ""
 
-cd /home/charles/NEXUS/NEXUS_GAZEBO_SIM
+cd "$ROOT_DIR"
 source install/setup.bash 2>/dev/null
 
 # 记录初始位置

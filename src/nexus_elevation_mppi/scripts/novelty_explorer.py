@@ -98,8 +98,8 @@ class ExplorerParams:
         self.d_step = 1.0
         self.d_min = 0.4
         self.d_max = 1.5
-        self.safe_radius = 0.1
-        self.trav_threshold = 0.3
+        self.safe_radius = 0.08
+        self.trav_threshold = 0.22
         self.slope_threshold = 90.0
         self.roughness_threshold = 1e9
         self.w_obs = 1.0
@@ -578,7 +578,7 @@ class NoveltyExplorer(Node):
                 ("pose_timeout_sec", 1.0),
                 ("map_timeout_sec", 2.0),
                 ("goal_republish_sec", 1.0),
-                ("occupancy_obstacle_threshold", 65),
+                ("occupancy_obstacle_threshold", 75),
                 ("radar_range", 5.0),
                 ("radar_rays", 180),
                 ("vision_range", 1.0),
@@ -592,8 +592,8 @@ class NoveltyExplorer(Node):
                 ("d_step", 1.0),
                 ("d_min", 0.4),
                 ("d_max", 1.5),
-                ("safe_radius", 0.1),
-                ("trav_threshold", 0.3),
+                ("safe_radius", 0.08),
+                ("trav_threshold", 0.22),
                 ("arrived_threshold", 0.2),
                 ("stuck_steps", 3),
                 ("stuck_disp_threshold", 0.05),
