@@ -580,7 +580,7 @@ PY
 # 主流程
 # ---------------------------------------------------------------------------
 main() {
-  bash "$ROOT_DIR/project_identity/logo/play_logo_intro.sh" 30 golden || true
+  bash "$ROOT_DIR/scripts/utils/play_logo_intro.sh" 30 golden || true
   printf -- "${C_BOLD}NEXUS_GAZEBO_SIM 构建 + 校验${C_RESET}\n"
   log_info "工作区: $WS_DIR"
   log_info "elevation ws: $ELEV_WS_DIR"

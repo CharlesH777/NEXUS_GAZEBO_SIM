@@ -1,6 +1,6 @@
 # nexus_elevation_mppi
 
-> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见 [LICENSE](../../project_identity/legal/LICENSE).
+> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见根目录 [LICENSE](../../LICENSE).
 
 NEXUS 仿真主线的感知 + 探索 + 局部规划包。从 CuPy 高程图出发，计算高度差通行性地图，
 驱动 frontier 自动探索，并用 C++ MPPI 做局部轨迹优化。

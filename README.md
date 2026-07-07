@@ -1,6 +1,6 @@
 # NEXUS_GAZEBO_SIM
 
-> **License**: 本项目为专有授权（All Rights Reserved）。详见 [project_identity/legal/LICENSE](project_identity/legal/LICENSE) 和 [项目授权声明](project_identity/legal/LICENSE)。第三方代码归属见 [project_identity/legal/NOTICE.md](project_identity/legal/NOTICE.md)。
+> **License**: 本项目为专有授权（All Rights Reserved）。详见 [LICENSE](LICENSE) 和 [项目授权声明](LICENSE)。第三方代码归属见 [NOTICE.md](NOTICE.md)。
 
 ROS 2 Humble + Gazebo Classic 11 四舵轮全向机器人仿真工作区。当前主线已经接入：
 
@@ -1355,6 +1355,6 @@ controller_server / FollowPath:               # nav2_mppi_params.yaml
 
 未经书面授权，不得将本项目全部或部分内容用于任何商业、比赛、竞赛、挑战赛、评测、评奖、课程设计、毕业设计、科研项目、论文复现、公开展示、教学或其他用途。
 
-原创代码（`src/nexus_*/`）采用 All Rights Reserved，Copyright © 2026 Charles。第三方代码（`src/third_party/`, `src/livox_ros_driver2/`, `src/ros2_livox_simulation/` 等）保留各自原始许可证，详见 [project_identity/legal/NOTICE.md](project_identity/legal/NOTICE.md)。完整授权声明见 [project_identity/legal/LICENSE](project_identity/legal/LICENSE)。
+原创代码（`src/nexus_*/`）采用 All Rights Reserved，Copyright © 2026 Charles。第三方代码（`src/third_party/`, `src/livox_ros_driver2/`, `src/ros2_livox_simulation/` 等）保留各自原始许可证，详见 [NOTICE.md](NOTICE.md)。完整授权声明见 [LICENSE](LICENSE)。
 
-如需授权，请提前联系作者或团队取得书面许可。贡献指南见 [project_identity/legal/CONTRIBUTING.md](project_identity/legal/CONTRIBUTING.md)。
+如需授权，请提前联系作者或团队取得书面许可。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。

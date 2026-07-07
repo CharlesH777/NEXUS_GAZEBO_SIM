@@ -1,6 +1,6 @@
 # nexus_gp_mapping
 
-> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见 [LICENSE](../../project_identity/legal/LICENSE).
+> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见根目录 [LICENSE](../../LICENSE).
 
 基于高斯过程 (Gaussian Process) 的地形建图节点。用 gpytorch 稀疏 GP（inducing point kernel）
 从点云拟合地形高度场，作为 CuPy 高程图之外的备选建图链路。
