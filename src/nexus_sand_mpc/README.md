@@ -1,6 +1,6 @@
 # nexus_sand_mpc
 
-> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见根目录 [LICENSE](../../LICENSE).
+> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见 [LICENSE](../../project_identity/legal/LICENSE).
 
 ROS 2 版沙地滑移 (sand-slip) MPC 指令补偿器。从 `sand_sim` 迁移而来，放在 MPPI 后级
 对速度指令做 slip 估计和延迟补偿，输出最终底盘 `/cmd_vel`。

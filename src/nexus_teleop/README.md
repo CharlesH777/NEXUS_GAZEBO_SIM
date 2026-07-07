@@ -1,6 +1,6 @@
 # nexus_teleop
 
-> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见根目录 [LICENSE](../../LICENSE).
+> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见 [LICENSE](../../project_identity/legal/LICENSE).
 
 遥控和位姿/TF 桥接工具包。提供手柄/键盘遥控 GUI（带实时参数调节）和 PoseStamped → TF 广播桥。
 

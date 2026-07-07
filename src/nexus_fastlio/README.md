@@ -1,6 +1,6 @@
 # nexus_fastlio
 
-> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见根目录 [LICENSE](../../LICENSE).
+> 专有授权 (All Rights Reserved), Copyright © 2026 Charles. 见 [LICENSE](../../project_identity/legal/LICENSE).
 
 FAST-LIO2 仿真适配节点。本包**不包含** FAST-LIO2 本体（`lio_node` 二进制在外部
 `third_party/FASTLIO2_ROS2` 中），只提供把 Gazebo Livox 仿真数据转换成 FAST-LIO2

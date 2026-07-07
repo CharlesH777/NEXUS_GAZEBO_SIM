@@ -17,7 +17,7 @@ set -euo pipefail
 FRAMES="${1:-30}"
 STYLE="${2:-golden}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-LOGO_SCRIPT="$ROOT_DIR/scripts/utils/nexus_logo.py"
+LOGO_SCRIPT="$ROOT_DIR/project_identity/logo/nexus_logo.py"
 
 # Graceful fallback: skip silently if anything is missing.
 [ -f "$LOGO_SCRIPT" ] || exit 0
