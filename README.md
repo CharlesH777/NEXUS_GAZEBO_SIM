@@ -2,20 +2,6 @@
 
 > **License**: 本项目为专有授权（All Rights Reserved）。详见 [LICENSE](LICENSE) 和 [项目授权声明](LICENSE)。第三方代码归属见 [NOTICE.md](NOTICE.md)。
 
-## NEXUS Logo
-
-本项目内置一个动画版 ASCII logo（旋转 + 3D 文字 + 粒子特效）：
-
-```bash
-# 完整动画效果（无限循环，Ctrl+C 退出）
-python3 scripts/utils/nexus_logo.py --style golden
-
-# 简短 intro（30 帧 ≈ 1.5 秒，启动时自动播放）
-bash scripts/utils/play_logo_intro.sh 30 golden
-```
-
-可用风格：`golden` `blackgold` `cyber` `ice` `matrix` `ember` `random`
-
 ROS 2 Humble + Gazebo Classic 11 四舵轮全向机器人仿真工作区。当前主线已经接入：
 
 ```text
@@ -58,10 +44,46 @@ known limitation: 仍有少量 MPPI all-collision 软警告，但不会硬停车
 
 ## 快速启动
 
-先清理旧进程：
+首次部署或拉取新代码后，先构建，再运行。下面命令默认仓库路径为：
+`~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM`。
+
+安装 Python 运行依赖：
 
 ```bash
-cd ~/NEXUS/NEXUS_GAZEBO_SIM
+cd ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM
+/usr/bin/python3 -m pip install --user numpy scipy casadi do-mpc ros2-numpy transforms3d
+```
+
+先构建高程图 workspace。`nexus_elevation_mppi` 依赖这里提供的
+`grid_map_msgs`，所以它必须先构建：
+
+```bash
+cd ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM
+export PYTHONNOUSERSITE=1
+source /opt/ros/humble/setup.bash
+
+cd tools/elevation_mapping_cupy_ros2_ws
+colcon build \
+  --packages-up-to elevation_mapping_cupy \
+  --symlink-install \
+  --cmake-args \
+    -DPython3_EXECUTABLE=/usr/bin/python3 \
+    -DPYTHON_EXECUTABLE=/usr/bin/python3
+
+cd ../..
+```
+
+再构建并校验主工作区：
+
+```bash
+MAP_SIM_ELEV_WS_DIR="$PWD/tools/elevation_mapping_cupy_ros2_ws" \
+  bash scripts/build_check.sh
+```
+
+构建通过后加载环境，并先清理旧进程：
+
+```bash
+source install/setup.bash
 bash scripts/stop.sh
 ```
 
@@ -83,14 +105,6 @@ MAP_SIM_GZCLIENT=1 bash scripts/run_mppi.sh
 bash runlocal/start.sh
 ```
 
-停止：
-
-```bash
-bash runlocal/stop.sh
-# 等价于
-bash scripts/stop.sh
-```
-
 如果机器有 `DISPLAY=:1` 但 Gazebo GUI 不稳定，优先用 headless：
 
 ```bash
@@ -98,6 +112,14 @@ MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
 ```
 
 `scripts/run_sim.sh` 在 headless 模式会清掉 `DISPLAY` 和 `WAYLAND_DISPLAY`，这是为了避免 Gazebo Classic 在错误 X/GLX 环境下 spawn 失败。
+
+停止：
+
+```bash
+bash runlocal/stop.sh
+# 等价于
+bash scripts/stop.sh
+```
 
 ## 一句话运行模式
 
@@ -227,20 +249,40 @@ export PYTHONNOUSERSITE=1
 
 ## 构建
 
-完整构建：
+完整部署构建先构建高程图 workspace，再构建主工作区：
 
 ```bash
-cd ~/NEXUS/NEXUS_GAZEBO_SIM
+cd ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM
+export PYTHONNOUSERSITE=1
+source /opt/ros/humble/setup.bash
+
+cd tools/elevation_mapping_cupy_ros2_ws
+colcon build \
+  --packages-up-to elevation_mapping_cupy \
+  --symlink-install \
+  --cmake-args \
+    -DPython3_EXECUTABLE=/usr/bin/python3 \
+    -DPYTHON_EXECUTABLE=/usr/bin/python3
+
+cd ../..
+MAP_SIM_ELEV_WS_DIR="$PWD/tools/elevation_mapping_cupy_ros2_ws" \
+  bash scripts/build_check.sh
+```
+
+只构建基础仿真和 Livox 驱动：
+
+```bash
+cd ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM
 bash scripts/build.sh
 ```
 
 只构建当前主线需要的包：
 
 ```bash
-cd ~/NEXUS/NEXUS_GAZEBO_SIM
+cd ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM
 export PYTHONNOUSERSITE=1
 source /opt/ros/humble/setup.bash
-source ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM/tools/elevation_mapping_cupy_ros2_ws/install/setup.bash
+source tools/elevation_mapping_cupy_ros2_ws/install/setup.bash
 
 colcon build \
   --packages-select \
@@ -819,7 +861,7 @@ MAP_SIM_ENABLE_NOVELTY_EXPLORATION=0 bash scripts/run_mppi.sh
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/NEXUS/NEXUS_GAZEBO_SIM/install/setup.bash
+source ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM/install/setup.bash
 
 ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{
   header: {frame_id: 'world'},
