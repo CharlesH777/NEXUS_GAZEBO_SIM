@@ -1,1487 +1,1315 @@
 # NEXUS_GAZEBO_SIM
 
-`NEXUS_GAZEBO_SIM` 是一个面向二次开发的 bare Gazebo 仿真副本。
+> **License**: 本项目为专有授权（All Rights Reserved）。详见 [LICENSE](LICENSE) 和 [项目授权声明](LICENSE)。第三方代码归属见 [NOTICE.md](NOTICE.md)。
 
-它的定位不是“带导航、带建图、带整套上层算法的一站式系统”，而是：
+## NEXUS Logo
 
-- 保留车体、环境、Gazebo 动力学、ROS 2 接口
-- 保留核心传感器接口
-  - Livox 雷达
-  - IMU
-  - 深度相机接口定义
-- 保留可视化链路
-  - Gazebo GUI
-  - RViz
-- 去掉导航、FastLIO、FastLIVO 等上层栈
-- 让外部算法、控制器、感知模块更容易直接接进来
+本项目内置一个动画版 ASCII logo（旋转 + 3D 文字 + 粒子特效）：
 
-如果你想把它当成“仿真底座”来接自己的控制、定位、感知、规划，这份 README 就是按这个目标写的。
+```bash
+# 完整动画效果（无限循环，Ctrl+C 退出）
+python3 scripts/utils/nexus_logo.py --style golden
 
----
+# 简短 intro（30 帧 ≈ 1.5 秒，启动时自动播放）
+bash scripts/utils/play_logo_intro.sh 30 golden
+```
 
-## 1. 这份工程现在是什么
+可用风格：`golden` `blackgold` `cyber` `ice` `matrix` `ember` `random`
 
-这个仓库现在更接近一个“最小可运行仿真平台”：
-
-- Gazebo 负责世界、物理和传感器模拟
-- `robot_state_publisher` 负责把 xacro 展开后的机器人模型发给 ROS
-- `spawn_entity.py` 负责把机器人真正生成到 Gazebo 世界里
-- `gazebo_ros2_control` 负责把 Gazebo 关节暴露成 ROS 2 控制接口
-- `cmd_vel_to_swerve` 负责把外部的 `/cmd_vel` 转成四个舵轮模块的底层关节命令
-- `fix_imu_time` 负责把 Gazebo IMU 接口整理成更稳定的外部消费接口
-- 可选的 `tf_pub` 插件负责发布世界位姿 / 里程计 / TF
-
-它不再包含：
-
-- `nav2`
-- `fast_lio`
-- `FAST-LIVO2-ROS2`
-- `vikit_common`
-- `vikit_ros`
-- 依赖这些上层栈的启动脚本和配置
-
-也就是说，这个工程现在只做一件事：
-
-> 提供一个稳定、结构清楚、接口明确的仿真底层，让别的系统接进来。
-
----
-
-## 2. 推荐理解方式
-
-把整个系统分成 6 层最容易理解：
-
-1. 入口脚本层
-   - `build_local.sh`
-   - `run_sim_local.sh`
-   - `run_sim_local_gui.sh`
-   - `run_sim_local_omni.sh`
-   - `run_sim_local_camera.sh`
-   - `open_depth_camera.sh`
-
-2. Launch 编排层
-   - `ws/src/ros2_livox_simulation/launch/sim_launch_omni.py`
-   - `ws/src/ros2_livox_simulation/launch/sim_launch.py`
-
-3. 机器人模型层
-   - `ws/src/ros2_livox_simulation/urdf/robot_sim_omni.xacro`
-   - `ws/src/ros2_livox_simulation/urdf/robot_sim.xacro`
-   - `ws/src/ros2_livox_simulation/urdf/depth_camera_gazebo.xacro`
-
-4. 控制与传感器桥接层
-   - `ws/src/ros2_livox_simulation/scripts/cmd_vel_to_swerve.py`
-   - `ws/src/ros2_livox_simulation/scripts/spawn_omni_controllers.py`
-   - `ws/src/ros2_livox_simulation/src/fix_imu_time.cpp`
-   - `ws/src/ros2_livox_simulation/src/livox_points_plugin.cpp`
-   - `ws/src/ros2_livox_simulation/src/tf_pub.cpp`
-
-5. 可视化配置层
-   - `ws/src/ros2_livox_simulation/config/nexus_gazebo_sim.rviz`
-
-6. 外部接入层
-   - 你的控制器、规划器、定位器、感知节点
-   - 它们通过 topic / TF / odom / spawn service 接进来
-
----
-
-## 3. 仓库保留了哪些核心内容
-
-### 3.1 ROS 包
-
-当前 `ws/src` 只保留两个包：
-
-- `livox_ros_driver2`
-- `ros2_livox_simulation`
-
-这意味着：
-
-- 传感器消息定义还在
-- Livox 自定义点云消息还在
-- Gazebo 世界、模型、xacro、launch、桥接脚本都还在
-- 但上层导航 / 建图 / 融合功能已经不在这个副本里
-
-### 3.2 根目录脚本
-
-- `build_local.sh`
-  - 编译仿真工作区
-- `run_sim_local.sh`
-  - 总入口，负责环境清理、默认参数、地图选择、启动 launch
-- `run_sim_local_gui.sh`
-  - 显式 GUI 入口
-  - 强制打开 `gzclient`
-  - 默认同时打开 RViz
-- `run_sim_local_omni.sh`
-  - 显式选择 omni/swerve 版本的快捷入口
-- `run_sim_local_camera.sh`
-  - 深度相机快捷入口
-  - 但当前默认仍会被保护逻辑拦住，因为 Gazebo Classic 中深度相机不稳定
-- `open_depth_camera.sh`
-  - 在仿真已经运行后，尝试动态挂一个运行时深度相机
-- `runlocal/stop.sh`
-  - 清理 Gazebo / launch / runtime camera 相关进程
-
----
-
-## 4. 整体运行链路
-
-推荐优先记住下面这条主链：
+ROS 2 Humble + Gazebo Classic 11 四舵轮全向机器人仿真工作区。当前主线已经接入：
 
 ```text
-build_local.sh
-  -> 构建 livox_ros_driver2 + ros2_livox_simulation
-
-run_sim_local.sh
-  -> 清理环境变量
-  -> 选择世界 / 默认出生点 / 默认光照 / 默认传感器参数
-  -> ros2 launch ros2_livox_simulation sim_launch_omni.py
-
-sim_launch_omni.py
-  -> 解析 world
-  -> 设置 GAZEBO_MODEL_PATH / GAZEBO_PLUGIN_PATH
-  -> xacro 展开 robot_sim_omni.xacro
-  -> 启动 gzserver / gzclient
-  -> 如果启用可视化，则启动 rviz2 并加载 bare 版 RViz 配置
-  -> 启动 robot_state_publisher
-  -> 调用 spawn_entity.py 生成 cube_robot
-  -> 拉起控制器、/cmd_vel 桥、IMU 整理节点
-
-robot_sim_omni.xacro
-  -> 定义底盘
-  -> 定义四个舵轮模块
-  -> 定义 Livox、IMU、深度相机挂点
-  -> 定义 ros2_control 接口
-  -> 挂 gazebo_ros2_control 插件
-  -> 可选挂 tf_pub 插件
+Livox 仿真雷达
+  -> elevation_mapping_cupy 高程图
+  -> 高度差通行性 OccupancyGrid
+  -> novelty frontier 自动探索
+  -> Nav2 MPPI 局部轨迹优化
+  -> sand MPC 指令补偿
+  -> /cmd_vel
+  -> 四舵轮 swerve 控制桥
+  -> Gazebo 机器人运动
 ```
 
-这是当前 bare 版本最核心的一条链路。
+这个 README 按“能把系统重新拉起来并定位问题”为目标写。优先看“快速启动”和“全链路说明”；调参、排障、算法细节在后面。
 
----
+## 当前状态
 
-## 5. 构建逻辑到底做了什么
+- 默认入口已经是完整探索链路：`runlocal/start.sh`、`run_sim_local.sh`、`scripts/start.sh` 最终都会进入 `scripts/run_sim.sh`，再按默认参数转到 `scripts/run_mppi.sh`。
+- `scripts/run_mppi.sh` 默认启动：Gazebo、Livox、真值位姿/odom、点云管线、CuPy 高程图、高度差通行图、Nav2 MPPI、sand MPC、novelty explorer。
+- MPPI 当前默认使用 Nav2 官方 `nav2_mppi_controller`（Omni 运动模型），通过 `launch/nav2_mppi.launch.py` 拉起 controller_server / planner_server / bt_navigator 等节点。C++ `mppi_navigator` 仍然保留，可通过 `scripts/run_elevation_mppi.sh` 使用（非默认入口）。
+- sand MPC 位于 MPPI 后级：Nav2 controller 输出 remap 到 `/mppi/cmd_vel_raw`，sand MPC 输出 `/cmd_vel`。
+- 探索节点使用高度差地图做雷达可见区域、novelty map、frontier、Dijkstra 和 goal lock。探索发布 `/goal_pose`，由 `continuous_navigator.py` 接入 Nav2 的 ComputePathToPose + FollowPath 动作。
+- 2026-07-03 做过 180 秒 Gazebo 全链路测试：探索持续发 goal/path，MPPI 和 sand MPC 持续出指令，机器人实际运动。
 
-入口文件：`build_local.sh`
-
-### 5.1 构建前检查
-
-它会先检查：
-
-- `/opt/ros/humble/setup.bash` 是否存在
-- `/usr/local/lib/liblivox_lidar_sdk_shared.so` 是否存在
-- `/usr/local/include/livox_lidar_api.h` 是否存在
-- `ws/src/livox_ros_driver2/build.sh` 是否可执行
-
-这一步的目的很简单：
-
-- 不让你在依赖缺失时“看起来像在构建，实际上一定会失败”
-
-### 5.2 Python / conda 去污染
-
-脚本会主动清理：
-
-- `PYTHONHOME`
-- `PYTHONPATH`
-- `CONDA_PREFIX`
-- 以及其他 conda 相关变量
-
-同时还会把 `LD_LIBRARY_PATH` 里明显来自 conda 的路径过滤掉。
-
-这样做是因为：
-
-- ROS 2 Humble 的 Python 环境
-- Gazebo 插件加载环境
-- 用户自己的 conda 环境
-
-这三者很容易互相污染，表现为：
-
-- `ros2` 命令行为异常
-- Python 包解析错乱
-- Gazebo / plugin 动态库加载冲突
-
-### 5.3 实际构建动作
-
-构建过程不是在根目录直接 `colcon build`，而是：
-
-1. 进入 `ws/src/livox_ros_driver2`
-2. 调用它自带的 `build.sh humble`
-3. 构建整个工作区
-4. 再 source `ws/install/setup.bash`
-5. 最后用 `ros2 pkg prefix` 检查两个包是否真的被 ROS 发现
-
-也就是说，这个脚本不只关心“命令是否跑完”，还关心“包是否真的可见”。
-
----
-
-## 6. 启动逻辑到底做了什么
-
-入口文件：`run_sim_local.sh`
-
-### 6.1 它的职责
-
-这个脚本负责：
-
-- 清理 Python / conda 环境
-- source ROS 和工作区
-- 设定默认运行参数
-- 选择地图和出生点
-- 选择 GUI / headless
-- 决定启哪个 launch 文件
-- 最终执行 `ros2 launch`
-
-### 6.2 它不是 launch，本质上是“参数整理层”
-
-你可以把它理解成：
-
-- 把一堆 shell 环境变量整理好
-- 再统一交给 `sim_launch_omni.py` 或 `sim_launch.py`
-
-### 6.3 它在内部做的关键事情
-
-#### A. 自动判断图形环境是否可能不稳定
-
-如果你开 GUI，它会尝试检测当前 OpenGL 是否落在软件渲染：
-
-- `llvmpipe`
-- `Accelerated: no`
-
-如果命中，会提示你：
-
-- 可能卡死
-- 建议改成 `MAP_SIM_GZCLIENT=0`
-
-#### B. 地图选择
-
-支持通过数字或别名选世界：
-
-- `1` -> `rm_2026_slam_world.world`
-- `2` -> `apollo15_map_only.world`
-- `3` -> `marsyard2020_map_only.world`
-- `4` -> `marsyard2021_map_only.world`
-- `5` -> `marsyard2022_map_only.world`
-- `6` -> `mars_gazebo_topography_map_only.world`
-- `7` / `showcase` -> `space_maps_showcase.world`
-- `8` / `cave` / `ltu_cave` -> `darpa_cave_01.world`
-
-如果你不传任何地图参数，当前默认就是：
-
-- `3` -> `marsyard2020_map_only.world`
-
-#### C. 自动设置默认出生点
-
-不同 world 有不同默认 `z` 值，避免车一生成就埋进地面或者悬空过高。
-
-#### D. 自动设置 Livox 默认采样参数
-
-例如 cave 世界默认点数更高、量程更短，这些都在入口层做了默认值分发。
-
-#### E. 自动设置光照默认参数
-
-例如 cave 场景默认不启太阳时间面板，其它 world 默认启用中午光照。
-
-#### F. 保护深度相机
-
-当前 bare 版保留了深度相机接口定义，但默认禁止直接启用：
-
-- 因为实测 Gazebo Classic 在这个环境里一旦启用 `/livox/depth/*`
-- `gzserver` / `gzclient` 可能会因为 OGRE 断言崩掉
-
-所以如果你设置了：
-
-```bash
-MAP_SIM_ENABLE_DEPTH_CAMERA=1
-```
-
-默认会直接报错退出。
-
-只有显式放开下面这个开关才允许尝试：
-
-```bash
-MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1
-```
-
-#### G. 自动处理 RViz 默认值
-
-现在默认策略是：
-
-- 只要 `MAP_SIM_GZCLIENT=1`
-- 就默认 `MAP_SIM_ENABLE_RVIZ=1`
-
-也就是说：
-
-- 主入口 `bash ./run_sim_local.sh` 在桌面环境里会默认打开 Gazebo GUI + RViz
-- 如果你只想开 Gazebo，不想开 RViz，可以手动设 `MAP_SIM_ENABLE_RVIZ=0`
-- 如果你是 headless，`MAP_SIM_GZCLIENT=0` 时 RViz 也会默认关闭
-
-### 6.4 最终传给 launch 的核心参数
-
-`run_sim_local.sh` 最终会把这些参数传给 launch：
-
-- `world_name`
-- `use_gui`
-- `enable_headless_rendering`
-- `spawn_robot`
-- `spawn_x`
-- `spawn_y`
-- `spawn_z`
-- `enable_livox`
-- `enable_depth_camera`
-- `enable_imu`
-- `enable_tf_pub`
-- `enable_rviz`
-- `rviz_config`
-- `lighting_preset`
-- `lighting_brightness`
-- `solar_time`
-- `enable_solar_time_panel`
-- `livox_samples`
-- `livox_downsample`
-- `livox_max_range`
-
-也就是说，根脚本和 launch 之间的边界很清楚：
-
-- 根脚本负责组织参数
-- launch 负责按这些参数起系统
-
----
-
-## 7. 推荐运行模式
-
-### 7.1 默认推荐：GUI + RViz bare 主链
-
-这是现在最推荐、最完整、最稳定的路径：
-
-```bash
-bash ./run_sim_local.sh
-```
-
-不带参数时默认启动 `3` 号地图，也就是 `marsyard2020_map_only.world`。
-
-如果你想显式表达“我要 GUI 版 bare 仿真”，也可以直接：
-
-```bash
-bash ./run_sim_local_gui.sh
-```
-
-这两条命令在当前默认配置下都会拉起：
-
-- `gzserver`
-- `gzclient`
-- `rviz2`
-
-### 7.2 只开 Gazebo GUI，不开 RViz
-
-```bash
-MAP_SIM_ENABLE_RVIZ=0 bash ./run_sim_local.sh
-```
-
-### 7.3 推荐 headless 验证
-
-如果只是验证系统能不能跑，最稳的是：
-
-```bash
-MAP_SIM_GZCLIENT=0 bash ./run_sim_local.sh
-```
-
-### 7.4 classic / legacy 版本
-
-根脚本仍保留：
-
-```bash
-MAP_SIM_BASE_VARIANT=classic
-```
-
-它会走：
-
-- `sim_launch.py`
-- `robot_sim.xacro`
-
-这个分支主要用于兼容历史结构。
-
-当前 bare 版本的主文档重点仍然放在：
-
-- omni / swerve 版本
-
-因为：
-
-- 默认也是它
-- `/cmd_vel` 控制桥也主要是它
-- 当前实际验证最充分的也是它
-
----
-
-## 8. Launch 层内部逻辑
-
-关键文件：`ws/src/ros2_livox_simulation/launch/sim_launch_omni.py`
-
-这个文件是整个系统的“编排器”。
-
-### 8.1 它做的事情按顺序是
-
-1. 解析 world 路径
-2. 解析光照参数
-3. 解析 `enable_livox` / `enable_depth_camera` / `enable_imu` / `enable_tf_pub`
-4. 展开 `robot_sim_omni.xacro`
-5. 组装 `GAZEBO_MODEL_PATH`
-6. 组装 `GAZEBO_PLUGIN_PATH`
-7. 启动 `gzserver`
-8. 如果 GUI 开启，再启动 `gzclient`
-9. 如果 `enable_rviz=1`，解析 RViz 配置并启动 `rviz2`
-10. 如果允许 solar panel，再延迟起 `solar_time_panel`
-11. 启动 `robot_state_publisher`
-12. 当 `robot_state_publisher` 启动后，调用 `spawn_entity.py`
-13. 当 `spawn_entity.py` 成功退出后，再启动：
-    - `spawn_omni_controllers`
-    - `cmd_vel_to_swerve`
-    - `fix_imu_time`（如果 IMU 开启）
-
-这个事件顺序非常重要，因为它避免了常见的时序问题：
-
-- 机器人还没生成就去找控制器
-- `robot_description` 还没准备好就调用 spawn
-- `/controller_manager` 还没出现就去配置控制器
-
-### 8.2 RViz 是怎么接进主链的
-
-当前 RViz 不是 shell 层随便再开一个窗口，而是由 launch 层正式托管。
-
-这样做的好处是：
-
-- 生命周期跟仿真主链一致
-- `use_sim_time` 能统一继承
-- 可以用 `MAP_SIM_RVIZ_CONFIG` 或 launch 参数 `rviz_config:=...` 替换自己的显示布局
-- 以后如果你想接别的可视化节点，也可以按同样方式挂进去
-
-默认 RViz 配置文件是：
-
-- `ws/src/ros2_livox_simulation/config/nexus_gazebo_sim.rviz`
-
-它当前主要展示：
-
-- `RobotModel`
-- `TF`
-- `/livox/lidar_PointCloud2`
-- 预留但默认关闭的 `/livox/depth/points`
-
-### 8.3 Launch 事件顺序的核心思想
-
-它不是“所有节点一口气并发起”，而是：
+验证记录：
 
 ```text
-robot_state_publisher 启动
-  -> spawn_entity
-    -> spawn 完成后
-      -> 控制器 / 控制桥 / IMU整理节点
+log: output/sim_tests/full_explore_sand_mpc_20260703_175315.log
+duration: 180 s
+world: marsyard2020_map_only.world
+displacement: about 3.53 m
+path length: about 31.8 m
+goal/path publications: 209
+cmd/raw/wheel command: continuous non-zero output
+known limitation: 仍有少量 MPPI all-collision 软警告，但不会硬停车
 ```
 
-这让启动稳定性高很多。
+严格结论：Gazebo 版已经能闭环探索并驱动车运动；还没有完成和 2D `map_sim/runsim` 同指标 benchmark，所以不能说已经完全达到 2D 仿真的探索效率。
 
----
+## 快速启动
 
-## 9. 机器人模型层到底定义了什么
+先清理旧进程：
 
-关键文件：`ws/src/ros2_livox_simulation/urdf/robot_sim_omni.xacro`
-
-这个文件不是单纯的几何模型，它同时定义了：
-
-- 机器人结构
-- 关节接口
-- Gazebo 传感器
-- ros2_control 接口
-- 可选 TF / odom 插件
-
-### 9.1 底盘结构
-
-它定义了：
-
-- `base_footprint`
-- `base_link`
-- 四个舵轮模块
-  - `left_front`
-  - `right_front`
-  - `left_rear`
-  - `right_rear`
-
-每个模块由两部分组成：
-
-- 转向关节 `*_steer_joint`
-- 车轮关节 `*_wheel_joint`
-
-所以从控制角度看：
-
-- 4 个位置控制关节
-- 4 个速度控制关节
-
-### 9.2 Livox 挂载
-
-默认挂在：
-
-- `livox_mount_link`
-
-如果启用了 `enable_livox_yaw_follow`，还会多一个：
-
-- `livox_yaw_joint`
-- `livox_yaw_link`
-
-让传感器朝向可以根据速度方向动态调整。
-
-### 9.3 深度相机挂点
-
-即使默认不开深度相机，挂点仍保留：
-
-- `depth_camera_mount_link`
-
-这样外部系统要挂自己的相机、或运行时加相机，不需要再改底盘主体结构。
-
-### 9.4 IMU 挂载
-
-IMU 定义在：
-
-- `imu_link`
-
-并固定连接到：
-
-- `livox_mount_link`
-
-这样做的一个重要目的就是：
-
-- 保持 `/livox/imu` 这个接口语义稳定
-
-即使你未来替换上层算法，只要 IMU 仍想和 Livox 坐标关系保持一致，就不需要再改接口。
-
----
-
-## 10. ros2_control 层到底怎么接上去的
-
-关键文件：
-
-- `robot_sim_omni.xacro`
-- `config/cube_rob_omni_ctrl.yaml`
-- `scripts/spawn_omni_controllers.py`
-
-### 10.1 Xacro 里声明了哪些关节接口
-
-在 `<ros2_control name="GazeboSystem" type="system">` 里声明：
-
-- 4 个转向关节使用 `position` command interface
-- 4 个车轮关节使用 `velocity` command interface
-
-也就是：
-
-| 关节类型 | 命令接口 | 用途 |
-| --- | --- | --- |
-| `*_steer_joint` | `position` | 决定舵轮朝向 |
-| `*_wheel_joint` | `velocity` | 决定车轮转速 |
-
-### 10.2 Gazebo 如何接入 ros2_control
-
-在 xacro 里挂了：
-
-```xml
-<plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+```bash
+cd ~/NEXUS/NEXUS_GAZEBO_SIM
+bash scripts/stop.sh
 ```
 
-并把参数文件指向：
+推荐的稳定 headless 启动：
 
-- `config/cube_rob_omni_ctrl.yaml`
+```bash
+MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
+```
 
-所以 Gazebo world 一旦把机器人生出来，就会自动把这些关节注册进 `/controller_manager`。
+带 Gazebo GUI：
 
-### 10.3 控制器参数文件的作用
+```bash
+MAP_SIM_GZCLIENT=1 bash scripts/run_mppi.sh
+```
 
-`cube_rob_omni_ctrl.yaml` 里定义了 3 个控制器：
+从默认 runlocal 入口启动：
 
-- `joint_state_broadcaster`
-- `steering_position_controller`
-- `wheel_velocity_controller`
+```bash
+bash runlocal/start.sh
+```
 
-含义分别是：
+停止：
 
-- `joint_state_broadcaster`
-  - 发布所有状态接口
-- `steering_position_controller`
-  - 收四个舵向角命令
-- `wheel_velocity_controller`
-  - 收四个车轮速度命令
+```bash
+bash runlocal/stop.sh
+# 等价于
+bash scripts/stop.sh
+```
 
-### 10.4 控制器为什么不是 launch 直接全起
+如果机器有 `DISPLAY=:1` 但 Gazebo GUI 不稳定，优先用 headless：
 
-因为 `/controller_manager` 什么时候就绪，取决于：
+```bash
+MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
+```
 
-- Gazebo 插件是否已经真正加载完
-- 机器人是否已经被 spawn 到 world
+`scripts/run_sim.sh` 在 headless 模式会清掉 `DISPLAY` 和 `WAYLAND_DISPLAY`，这是为了避免 Gazebo Classic 在错误 X/GLX 环境下 spawn 失败。
 
-所以这里单独写了 `spawn_omni_controllers.py`，它会按状态机做：
+## 一句话运行模式
 
-1. `list`
-2. `load`
-3. `configure`
-4. `switch activate`
-5. 打印最终状态
+完整自动探索：
 
-比“盲发 spawner 命令”更稳。
+```bash
+bash scripts/run_mppi.sh
+```
 
----
+完整自动探索，headless：
 
-## 11. 控制接口总览
+```bash
+MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
+```
 
-这是外部系统最需要记住的一张表。
+关掉探索，只保留 MPPI，手动发 `/goal_pose`：
 
-### 11.1 推荐的高层控制入口
+```bash
+MAP_SIM_ENABLE_NOVELTY_EXPLORATION=0 bash scripts/run_mppi.sh
+```
 
-| 接口 | 类型 | 方向 | 谁发布 | 谁消费 | 用途 |
-| --- | --- | --- | --- | --- | --- |
-| `/cmd_vel` | `geometry_msgs/msg/Twist` | 输入 | 你的控制器 | `cmd_vel_to_swerve` | 推荐的主控制入口 |
+关掉 sand MPC，让 MPPI 直接发 `/cmd_vel`：
 
-### 11.2 中间层底盘控制接口
+```bash
+MAP_SIM_ENABLE_SAND_MPC=0 bash scripts/run_mppi.sh
+```
 
-| 接口 | 类型 | 方向 | 谁发布 | 谁消费 | 用途 |
-| --- | --- | --- | --- | --- | --- |
-| `/steering_position_controller/commands` | `std_msgs/msg/Float64MultiArray` | 输入 | `cmd_vel_to_swerve` 或你的低层控制器 | `steering_position_controller` | 4 个舵轮转向角 |
-| `/wheel_velocity_controller/commands` | `std_msgs/msg/Float64MultiArray` | 输入 | `cmd_vel_to_swerve` 或你的低层控制器 | `wheel_velocity_controller` | 4 个车轮角速度 |
+只开 Gazebo + 机器人 + 传感器，不开高程图/MPPI：
 
-### 11.3 状态接口
+```bash
+MAP_SIM_ENABLE_MPPI_NAVIGATION=0 \
+MAP_SIM_ENABLE_ELEVATION_MAPPING=0 \
+MAP_SIM_ENABLE_DEFAULT_STACK=0 \
+bash scripts/run_sim.sh
+```
 
-| 接口 | 类型 | 方向 | 用途 |
-| --- | --- | --- | --- |
-| `/joint_states` | `sensor_msgs/msg/JointState` | 输出 | 常规关节状态消费 |
-| `/dynamic_joint_states` | `control_msgs/msg/DynamicJointState` | 输出 | ros2_control 更完整的状态接口 |
+只开高程图和通行图，不开 MPPI：
 
-### 11.4 兼容 classic 版本的接口
+```bash
+MAP_SIM_ENABLE_MPPI_NAVIGATION=0 bash scripts/run_elevation_mppi.sh
+```
 
-如果走 `MAP_SIM_BASE_VARIANT=classic`，则更核心的是：
+## 工作区结构
 
-| 接口 | 类型 | 方向 | 用途 |
-| --- | --- | --- | --- |
-| `/rear_wheel_velocity_controller/commands` | `std_msgs/msg/Float64MultiArray` | 输入 | classic 版本车轮速度控制 |
+```text
+NEXUS_GAZEBO_SIM/
+├── README.md
+├── config/
+│   ├── nexus_navigation_stack.yaml   # 高程图/通行图/sand MPC/探索 统一参数
+│   └── nav2_mppi_params.yaml          # Nav2 MPPI controller + costmap 参数
+├── launch/
+│   ├── nav2_mppi.launch.py            # Nav2 栈 launch（controller/planner/bt/...）
+│   └── lrae_exploration.py            # LRAE 探索 launch
+├── scripts/
+│   ├── start.sh                       # 顶层入口
+│   ├── run_sim.sh                     # 核心仿真启动
+│   ├── run_mppi.sh                    # 全链路（Nav2 MPPI + sand MPC + 探索）
+│   ├── run_elevation_mppi.sh          # CuPy 高程图 + C++ mppi_navigator（非默认）
+│   ├── run_fastlio.sh                 # FAST-LIO2 便捷启动
+│   ├── run_gp_fastlio.sh / run_gp_nav.sh  # GP 建图链路
+│   ├── run_lrae.sh / monitor_lrae.sh  # LRAE 探索
+│   ├── build.sh / build_fastlio.sh / build_check.sh
+│   ├── check_deps.sh / install_deps.sh
+│   ├── open_teleop.sh / open_depth_camera.sh
+│   └── stop.sh
+├── runlocal/
+│   ├── start.sh
+│   └── stop.sh
+├── run_sim_local.sh
+├── src/
+│   ├── ros2_livox_simulation/
+│   ├── livox_ros_driver2/
+│   ├── nexus_elevation_mppi/
+│   ├── nexus_sand_mpc/
+│   ├── nexus_fastlio/
+│   ├── nexus_gp_mapping/
+│   ├── nexus_teleop/
+│   └── third_party/
+├── tools/
+│   ├── elevation_mapping_cupy_ros2_ws/  # CuPy 高程图工作区（build/install）
+│   └── elevation_ros2/                  # 高程图构建辅助脚本
+├── docs/
+└── output/
+    ├── elevation_maps/
+    └── sim_tests/
+```
 
-但当前推荐你优先使用 omni 版本，不建议把新功能主要接在 classic 分支上。
+核心包：
 
----
+| 包 | 作用 |
+|---|---|
+| `ros2_livox_simulation` | Gazebo world、机器人模型、Livox/IMU 插件、controller launch、`cmd_vel_to_swerve` |
+| `livox_ros_driver2` | Livox CustomMsg 消息定义和驱动依赖 |
+| `nexus_elevation_mppi` | 高程图导出、高度差通行图、novelty explorer、C++ MPPI（C++ MPPI 仅 `run_elevation_mppi.sh` 使用；默认链路用 Nav2 MPPI） |
+| `nexus_sand_mpc` | 从 `sand_sim` 迁移来的 sand-slip MPC 指令补偿器 |
+| `nexus_fastlio` | FAST-LIO2 仿真适配 |
+| `nexus_gp_mapping` | GP 地形建图旧链路 |
+| `nexus_teleop` | 遥控和 pose/TF 桥 |
 
-## 12. `/cmd_vel` 到车轮命令，内部到底怎么实现
+## 系统依赖
 
-关键文件：`ws/src/ros2_livox_simulation/scripts/cmd_vel_to_swerve.py`
+已知目标环境：
 
-这是当前 bare 版最重要的控制桥。
+| 项 | 版本/路径 |
+|---|---|
+| Ubuntu | 22.04 |
+| ROS 2 | Humble |
+| Gazebo | Gazebo Classic 11 |
+| Nav2 | Humble 官方包（`nav2_controller`、`nav2_planner`、`nav2_bt_navigator` 等） |
+| Livox SDK | `/usr/local/lib/liblivox_lidar_sdk_shared.so` |
+| CuPy elevation mapping workspace | `$ROOT_DIR/tools/elevation_mapping_cupy_ros2_ws`（即仓库内 `tools/elevation_mapping_cupy_ros2_ws`） |
+| Python runtime | 尽量使用 `/usr/bin/python3`，不要让 conda 污染 ROS 环境 |
 
-### 12.1 它的职责
+Python 依赖：
 
-它把：
+```bash
+/usr/bin/python3 -m pip install --user numpy scipy casadi do-mpc
+```
 
-- 外部系统发布的 `/cmd_vel`
+如果系统 Python 被 conda 或 `~/.local` 污染，构建/运行前优先设置：
 
-转成：
+```bash
+export PYTHONNOUSERSITE=1
+```
 
-- 四个舵向角
-- 四个车轮角速度
+注意：`nexus_sand_mpc` 的优化求解使用 `do-mpc` 和 CasADi。它不是手写 MPC 求解器；ROS 节点只负责建模、延迟队列、观测回放和指令封装。
 
-再分别发到：
+## 构建
 
-- `/steering_position_controller/commands`
-- `/wheel_velocity_controller/commands`
+完整构建：
 
-### 12.2 输入输出关系
+```bash
+cd ~/NEXUS/NEXUS_GAZEBO_SIM
+bash scripts/build.sh
+```
+
+只构建当前主线需要的包：
+
+```bash
+cd ~/NEXUS/NEXUS_GAZEBO_SIM
+export PYTHONNOUSERSITE=1
+source /opt/ros/humble/setup.bash
+source ~/NEXUS/NEXUS_LIDAR_SIM/NEXUS_GAZEBO_SIM/tools/elevation_mapping_cupy_ros2_ws/install/setup.bash
+
+colcon build \
+  --packages-select \
+    livox_ros_driver2 \
+    ros2_livox_simulation \
+    nexus_elevation_mppi \
+    nexus_sand_mpc \
+    nexus_fastlio \
+    nexus_teleop \
+    nexus_gp_mapping \
+  --symlink-install
+```
+
+构建后加载：
+
+```bash
+source install/setup.bash
+```
+
+常见构建问题：
+
+| 现象 | 处理 |
+|---|---|
+| `pkgutil.ImpImporter` 相关 setuptools 错误 | `export PYTHONNOUSERSITE=1` |
+| 找不到 Livox SDK | 确认 `/usr/local/lib/liblivox_lidar_sdk_shared.so` 和 `/usr/local/include/livox_lidar_api.h` 存在 |
+| 找不到 elevation_mapping_cupy | 先构建 `tools/elevation_mapping_cupy_ros2_ws`（仓库内） |
+| `do_mpc` 或 `casadi` 找不到 | 给 `/usr/bin/python3` 安装，不要只装在 conda 环境 |
+
+## 启动脚本关系
+
+入口关系如下：
+
+```text
+runlocal/start.sh
+  -> scripts/start.sh
+    -> scripts/run_sim.sh
+      -> scripts/run_mppi.sh              # 默认 MAP_SIM_ENABLE_MPPI_NAVIGATION=1
+        -> scripts/run_sim.sh             # 内部启动基础仿真
+        -> elevation_map_exporter.py
+        -> traversability_to_map.py
+        -> elevation_mapping_cupy
+        -> nav2_mppi.launch.py            # Nav2 栈（controller_server / planner_server / bt_navigator / ...）
+        -> continuous_navigator.py        # /goal_pose -> ComputePathToPose + FollowPath
+        -> sand_mpc_compensator
+        -> novelty_explorer
+```
+
+> 如果用 `scripts/run_elevation_mppi.sh`（非默认），则 Nav2 部分替换为 C++ `mppi_navigator`，且不含 sand MPC / novelty explorer。
+
+`scripts/start.sh` 默认参数：
+
+```bash
+MAP_SIM_GZCLIENT=1
+MAP_SIM_ENABLE_RVIZ=1
+MAP_SIM_ENABLE_DEFAULT_STACK=0
+MAP_SIM_ENABLE_ELEVATION_MAPPING=1
+MAP_SIM_ENABLE_MPPI_NAVIGATION=1
+```
+
+因此直接运行：
+
+```bash
+bash runlocal/start.sh
+```
+
+会走完整探索链路。
+
+## 全链路数据流
+
+```text
+Gazebo world
+  -> Livox Mid360 plugin
+    -> /livox/lidar
+    -> /livox/lidar_PointCloud2
+      -> elevation_mapping_cupy
+        -> /elevation_mapping_node/elevation_map
+          -> elevation_map_exporter
+            -> output/elevation_maps/<stamp>/*
+          -> traversability_to_map
+            -> /traversability_map
+              -> novelty_explorer
+                -> /novelty_explorer/radar_known
+                -> /novelty_explorer/novelty_map
+                -> /goal_pose
+                -> /mppi/reference_path          # 仅 C++ mppi_navigator 消费；Nav2 自规划路径
+              -> Nav2 costmap static_layer        # 订阅 /traversability_map
+              -> continuous_navigator.py          # /goal_pose -> ComputePathToPose + FollowPath
+                -> controller_server               # nav2_mppi_controller (Omni)
+                  -> /mppi/cmd_vel_raw             # sand MPC 开启时 remap
+                  -> /plan                         # planner_server 全局路径
+                    -> sand_mpc_compensator
+                      -> /cmd_vel
+                        -> cmd_vel_to_swerve
+                          -> /steering_position_controller/commands
+                          -> /wheel_velocity_controller/commands
+                            -> ros2_control
+                              -> Gazebo robot
+```
+
+位姿和速度来源：
+
+```text
+Gazebo truth plugin
+  -> /cube_robot/world_pose
+  -> /nav_odom
+```
+
+当前探索/MPPI 默认用 `/nav_odom` 和 `/cube_robot/world_pose`，这是仿真闭环的稳定基线。后续接真实 SLAM/定位时，应替换为真实 odom/pose 输入。
+
+## 关键 ROS Topics
+
+| Topic | Type | 方向 | 说明 |
+|---|---|---|---|
+| `/livox/lidar` | `livox_ros_driver2/msg/CustomMsg` | Gazebo -> ROS | Livox 原生点云 |
+| `/livox/lidar_PointCloud2` | `sensor_msgs/msg/PointCloud2` | Gazebo -> ROS | 标准点云 |
+| `/livox/imu` | `sensor_msgs/msg/Imu` | Gazebo -> ROS | 原始 IMU |
+| `/imu_fixed` | `sensor_msgs/msg/Imu` | ROS -> ROS | 修正时间戳后的 IMU |
+| `/cube_robot/world_pose` | `geometry_msgs/msg/PoseStamped` | Gazebo -> ROS | 机器人真值位姿 |
+| `/nav_odom` | `nav_msgs/msg/Odometry` | Gazebo -> ROS | 平面 odom |
+| `/elevation_mapping_node/elevation_map` | `grid_map_msgs/msg/GridMap` | mapping -> ROS | CuPy 高程图 |
+| `/traversability_map` | `nav_msgs/msg/OccupancyGrid` | traversability -> ROS | 高度差通行性地图（Nav2 costmap static_layer 也订阅） |
+| `/novelty_explorer/radar_known` | `nav_msgs/msg/OccupancyGrid` | explorer -> ROS | 模拟雷达已知区域 |
+| `/novelty_explorer/novelty_map` | `nav_msgs/msg/OccupancyGrid` | explorer -> ROS | novelty/frontier 调试图 |
+| `/goal_pose` | `geometry_msgs/msg/PoseStamped` | explorer/user -> Nav2 | 探索目标（continuous_navigator 接入 Nav2） |
+| `/mppi/reference_path` | `nav_msgs/msg/Path` | explorer -> ROS | 探索参考路径（仅 C++ mppi_navigator 消费；Nav2 自规划路径不消费） |
+| `/plan` | `nav_msgs/msg/Path` | Nav2 planner -> ROS | Nav2 全局规划路径 |
+| `/mppi/cmd_vel_raw` | `geometry_msgs/msg/Twist` | Nav2 controller -> MPC | Nav2 controller 速度输出（sand MPC 开启时 remap） |
+| `/cmd_vel` | `geometry_msgs/msg/Twist` | MPC/user -> swerve | 最终底盘速度指令 |
+| `/steering_position_controller/commands` | `std_msgs/msg/Float64MultiArray` | bridge -> controller | 4 个舵轮转角 |
+| `/wheel_velocity_controller/commands` | `std_msgs/msg/Float64MultiArray` | bridge -> controller | 4 个车轮角速度 |
+| `/joint_states` | `sensor_msgs/msg/JointState` | controller -> ROS | 关节状态 |
+
+> C++ `mppi_navigator`（`run_elevation_mppi.sh` 模式）额外发布 `/mppi/optimal_path`、`/mppi/reference_path_debug`、`/mppi/terrain_cost_map`，默认 Nav2 模式下不存在这些 topic。
+
+## 核心配置文件
+
+主配置：
+
+```text
+config/nexus_navigation_stack.yaml     # 高程图/通行图/sand MPC/探索 统一参数
+config/nav2_mppi_params.yaml            # Nav2 MPPI controller + costmap 参数
+```
+
+`nexus_navigation_stack.yaml` 给以下节点供参：
+
+```text
+/elevation_mapping_node
+/elevation_map_exporter
+/traversability_to_map
+/sand_mpc_compensator
+/novelty_explorer
+```
+
+`nav2_mppi_params.yaml` 给 Nav2 栈供参（`controller_server`、`planner_server`、`bt_navigator`、`behavior_server`、`smoother_server`、`waypoint_follower`）。
+
+> `nexus_navigation_stack.yaml` 中也保留了一段 `/mppi_navigator` 参数，仅供 `run_elevation_mppi.sh`（C++ 模式）使用，默认 `run_mppi.sh` 不消费它。
+
+如需单独替换某一类参数，可以用环境变量：
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `MAP_SIM_STACK_CONFIG` | `config/nexus_navigation_stack.yaml` | 高程图/通行图/sand MPC/探索 统一参数 |
+| `MAP_SIM_NAV2_PARAMS` | `config/nav2_mppi_params.yaml` | Nav2 MPPI controller + costmap 参数（`run_mppi.sh` 使用） |
+| `MAP_SIM_ELEVATION_CONFIG` | `MAP_SIM_STACK_CONFIG` | CuPy 高程图参数 |
+| `MAP_SIM_EXPORTER_CONFIG` | `MAP_SIM_STACK_CONFIG` | 高程图导出参数 |
+| `MAP_SIM_TRAVERSABILITY_CONFIG` | `MAP_SIM_STACK_CONFIG` | 通行图参数 |
+| `MAP_SIM_MPPI_CONFIG` | `MAP_SIM_STACK_CONFIG` | C++ mppi_navigator 参数（仅 `run_elevation_mppi.sh` 使用；`run_mppi.sh` 用 `MAP_SIM_NAV2_PARAMS`） |
+| `MAP_SIM_SAND_MPC_CONFIG` | `MAP_SIM_STACK_CONFIG` | sand MPC 参数 |
+| `MAP_SIM_EXPLORER_CONFIG` | `MAP_SIM_STACK_CONFIG` | 探索参数 |
+
+示例：
+
+```bash
+MAP_SIM_NAV2_PARAMS=/tmp/my_nav2.yaml bash scripts/run_mppi.sh
+```
+
+## 算法 1：高度差通行性地图
+
+节点：
+
+```bash
+ros2 run nexus_elevation_mppi traversability_to_map
+```
 
 输入：
 
-- `geometry_msgs/msg/Twist`
-  - `linear.x`
-  - `linear.y`
-  - `angular.z`
+```text
+/elevation_mapping_node/elevation_map
+```
 
 输出：
 
-- `Float64MultiArray[4]` 舵向角
-- `Float64MultiArray[4]` 车轮角速度
+```text
+/traversability_map
+```
 
-### 12.3 内部核心计算
-
-对于每个轮模块位置 `(x_i, y_i)`，它先算该模块在车体坐标系下应有的速度向量：
+算法：
 
 ```text
-v_ix = v_x - w_z * y_i
-v_iy = v_y + w_z * x_i
+GridMap elevation layer
+  -> 解码 circular buffer
+  -> 按 OccupancyGrid 坐标系重排
+  -> 对每个 cell 取 k x k 邻域
+  -> 计算局部 max(height) - min(height)
+  -> 映射到 OccupancyGrid:
+       0   = free / white
+       100 = obstacle / black
+       -1  = unknown / gray
+  -> NaN-aware median filter
+  -> 发布 /traversability_map
 ```
 
-然后求：
+默认参数：
+
+| 参数 | 默认 | 说明 |
+|---|---:|---|
+| `kernel_size` | `3` | 局部高度差窗口 |
+| `clear_below_m` | `0.04` | 低于该高度差直接视为 free |
+| `accumulate_from_m` | `0.05` | 从该高度差开始线性增加占据值 |
+| `full_at_m` | `0.10` | 达到该高度差视为 full obstacle |
+| `median_filter_size` | `3` | NaN-aware 中值滤波窗口 |
+| `unknown_value` | `-1` | 未观测区域 |
+
+这个算法是当前探索和 MPPI 的共享地形基础。它刻意不依赖 CuPy 自带的 CNN traversability 层，而是从 elevation 层直接算高度差，便于和 `map_sim/runsim` 的核心逻辑对齐。
+
+## 算法 2：Novelty Explorer 自动探索
+
+节点：
+
+```bash
+ros2 run nexus_elevation_mppi novelty_explorer
+```
+
+输入：
 
 ```text
-speed_i = sqrt(v_ix^2 + v_iy^2) / wheel_radius
-angle_i = atan2(v_iy, v_ix)
+/traversability_map
+/nav_odom
+/cube_robot/world_pose
 ```
 
-也就是：
-
-- `angle_i` 是舵轮要朝向哪里
-- `speed_i` 是车轮要转多快
-
-### 12.4 它还做了哪些工程化处理
-
-#### A. 小速度死区
-
-如果某个模块速度太小，小于 `module_speed_deadband`，它会：
-
-- 保持当前角度不动
-- 车轮速度置零
-
-这样可以避免低速抖动。
-
-#### B. 全轮归一化限幅
-
-如果四个轮里有任意一个轮速超过 `max_wheel_speed`，它不会只截断一个轮，而是按比例缩放全部轮速。
-
-好处是：
-
-- 保持运动方向一致
-- 不会因为单个轮饱和让整体运动变形
-
-#### C. 180 度翻转优化
-
-如果目标舵向和当前舵向差太大，超过 90 度，它会：
-
-- 把目标角度加 180 度
-- 同时把轮速取反
-
-等价于：
-
-- 不用让舵轮大幅转过去
-- 直接反向滚动轮子更快
-
-这在舵轮系统里非常常见，也很关键。
-
-#### D. 转向速率限制
-
-每个周期允许的最大转向变化量是：
+输出：
 
 ```text
-max_steer_step = max_steering_rate / publish_rate
+/goal_pose
+/mppi/reference_path
+/novelty_explorer/radar_known
+/novelty_explorer/novelty_map
 ```
 
-这能避免：
-
-- 目标角度一步跳太大
-- Gazebo 里出现不自然的急剧转向
-
-#### E. 转向未对齐时降低驱动输出
-
-它会根据“当前命令角”和“真正目标角”的残差，计算一个 `alignment_scale`：
-
-- 角度没对齐时，减小车轮速度
-- 角度越接近，速度越接近原始目标
-
-这样可以避免：
-
-- 舵轮还没摆正，轮子就全速拖着横向打滑
-
-这是整个控制桥里非常重要的一个工程细节。
-
-#### F. 命令超时保护
-
-如果超过 `command_timeout` 没收到新的 `/cmd_vel`，它会自动输出零命令。
-
-作用是：
-
-- 外部控制器死掉时，机器人不会一直沿着旧命令跑
-
-### 12.5 这意味着外部系统该怎么接
-
-如果你是：
-
-- 路径跟踪器
-- 遥操作器
-- 强化学习策略
-- MPC
-- 视觉伺服节点
-
-最推荐的接法就是：
-
-> 只发 `/cmd_vel`，不要直接碰四个舵轮控制器。
-
-因为：
-
-- 舵轮分解
-- 转向限速
-- 角度翻转
-- 未对齐减速
-
-这些内部逻辑已经替你做了。
-
----
-
-## 13. 如果你不想发 `/cmd_vel`，而想直接控底层，应该怎么做
-
-有两种情况。
-
-### 13.1 你要自己做低层舵轮控制
-
-这时你应该直接发布：
-
-- `/steering_position_controller/commands`
-- `/wheel_velocity_controller/commands`
-
-但要注意：
-
-- `cmd_vel_to_swerve` 默认也会往这两个 topic 发命令
-- 如果你不关闭它，你和它会抢同一组控制器
-
-### 13.2 正确做法
-
-推荐二选一：
-
-1. 复制一份 `sim_launch_omni.py`，把 `cmd_vel_to_swerve` 节点移掉
-2. 或者在你的专用 launch 里不要起 `cmd_vel_to_swerve`
-
-不推荐：
-
-- 一边保留 `cmd_vel_to_swerve`
-- 一边自己也往控制器 topic 发
-
-因为结果会不可预测。
-
----
-
-## 14. 传感器接口总览
-
-### 14.1 Livox 雷达接口
-
-| 接口 | 类型 | 用途 |
-| --- | --- | --- |
-| `/livox/lidar` | `livox_ros_driver2/msg/CustomMsg` | Livox 风格原生点云 |
-| `/livox/lidar_PointCloud2` | `sensor_msgs/msg/PointCloud2` | 标准 ROS 点云接口 |
-
-关键文件：
-
-- `src/livox_points_plugin.cpp`
-- `urdf/mid360.xacro`
-
-实现逻辑：
-
-- Gazebo 的 ray sensor 插件被扩展为 `LivoxPointsPlugin`
-- 同一次扫描同时构造两种消息
-  - `CustomMsg`
-  - `PointCloud2`
-- 所以外部系统可以按需求任选一种接
-
-推荐接法：
-
-- 你自己的 Livox 风格算法：订阅 `/livox/lidar`
-- 通用 ROS / PCL 算法：订阅 `/livox/lidar_PointCloud2`
-
-### 14.2 IMU 接口
-
-| 接口 | 类型 | 用途 |
-| --- | --- | --- |
-| `/livox/imu` | `sensor_msgs/msg/Imu` | Gazebo 原始 IMU 输出 |
-| `/imu_fixed` | `sensor_msgs/msg/Imu` | 经 `fix_imu_time` 整理后的 IMU 输出 |
-
-关键文件：
-
-- `robot_sim_omni.xacro`
-- `src/fix_imu_time.cpp`
-
-`fix_imu_time` 当前默认做的事情：
-
-- 订阅 `/livox/imu`
-- 发布 `/imu_fixed`
-- 当前默认不做旋转修正
-- 当前默认不做时间偏移
-
-但它保留了下面这些可扩展参数：
-
-- `timestamp_offset_sec`
-- `apply_rotation`
-- `rotation_pitch_deg`
-
-所以如果以后你接入：
-
-- 真机对齐标定
-- 坐标系修正
-- 时间戳补偿
-
-你不必重写整个 IMU 链，只要调这个节点或改它参数即可。
-
-### 14.3 深度相机接口
-
-保留的接口定义：
-
-| 接口 | 类型 |
-| --- | --- |
-| `/livox/depth/image_raw` | `sensor_msgs/msg/Image` |
-| `/livox/depth/camera_info` | `sensor_msgs/msg/CameraInfo` |
-| `/livox/depth/depth/image_raw` | `sensor_msgs/msg/Image` |
-| `/livox/depth/depth/camera_info` | `sensor_msgs/msg/CameraInfo` |
-| `/livox/depth/points` | `sensor_msgs/msg/PointCloud2` |
-
-关键文件：
-
-- `urdf/depth_camera_gazebo.xacro`
-- `open_depth_camera.sh`
-- `scripts/runtime_depth_camera.py`
-
-当前状态要明确说明：
-
-- 接口定义保留了
-- 参数通道保留了
-- 运行时动态挂相机的工具也保留了
-- 但默认不建议启用
-
-原因不是接口没做，而是：
-
-- 这个 Gazebo Classic 环境里深度相机插件会触发不稳定崩溃
-
-所以这个 bare 版对深度相机的设计是：
-
-- 保留接口形状
-- 保留未来接入点
-- 当前稳定主链默认不用它
-
----
-
-## 15. 可选位姿 / TF / odom 接口
-
-关键文件：
-
-- `robot_sim_omni.xacro`
-- `src/tf_pub.cpp`
-
-默认：
-
-- `MAP_SIM_ENABLE_TF_PUB=0`
-
-开启后会挂载 `libtf_pub.so` 插件。
-
-### 15.1 它会发布什么
-
-| 接口 | 类型 | 说明 |
-| --- | --- | --- |
-| `/cube_robot/world_pose` | `geometry_msgs/msg/PoseStamped` | 机器人世界位姿 |
-| `/livox/world_pose` | `geometry_msgs/msg/PoseStamped` | Livox 世界位姿 |
-| `/nav_odom` | `nav_msgs/msg/Odometry` | 平面化里程计 |
-| `/odom` | `nav_msgs/msg/Odometry` | legacy 风格里程计 |
-| `odom -> base_footprint` | TF | 平面 TF |
-
-### 15.2 它内部怎么计算
-
-`tf_pub` 会：
-
-1. 从 Gazebo 读取 `model_->WorldPose()`
-2. 读取 `/clock`
-3. 用模型姿态计算：
-   - 完整世界位姿
-   - 仅 yaw 的平面姿态
-4. 发布：
-   - `/cube_robot/world_pose`
-   - `/nav_odom`
-   - `/odom`
-   - TF
-
-### 15.3 适合谁接
-
-适合这些外部模块：
-
-- 想拿真值位姿做评估的算法
-- 想拿平面里程计当输入的控制器
-- 想做 Teacher / Student 或 imitation 的训练脚本
-- 想把仿真真值录包对齐的工具
-
----
-
-## 16. 外部系统接入指南
-
-这一节是最关键的。
-
----
-
-### 16.1 接你自己的高层控制器
-
-最推荐的方式：
-
-- 你的节点输出 `geometry_msgs/msg/Twist`
-- 发布到 `/cmd_vel`
-
-这样你不需要自己处理：
-
-- 四轮舵向分解
-- 转向限速
-- 轮速归一化
-- 轮角翻转
-
-最小示例：
-
-```python
-import rclpy
-from geometry_msgs.msg import Twist
-from rclpy.node import Node
-
-
-class DemoCmd(Node):
-    def __init__(self):
-        super().__init__("demo_cmd")
-        self.pub = self.create_publisher(Twist, "/cmd_vel", 10)
-        self.timer = self.create_timer(0.1, self.tick)
-
-    def tick(self):
-        msg = Twist()
-        msg.linear.x = 0.8
-        msg.linear.y = 0.0
-        msg.angular.z = 0.2
-        self.pub.publish(msg)
-
-
-rclpy.init()
-node = DemoCmd()
-rclpy.spin(node)
+主逻辑：
+
+```text
+高度差 OccupancyGrid
+  -> 转内部 UNKNOWN/FREE/OBSTACLE 网格
+  -> 从机器人位姿做模拟 radar raycast
+  -> radar_known 记录当前可见 free/obstacle
+  -> novelty_map 对已观测区域做衰减
+  -> 找 free/unknown 边界 frontier
+  -> 对候选 frontier 计算安全性、距离、novelty、路径代价
+  -> Dijkstra 规划到局部 goal
+  -> GoalLock 保持当前目标，处理 arrived/stuck/unreachable/path_jump
+  -> 发布 /goal_pose 和 /mppi/reference_path
 ```
 
----
+重要对齐点：
 
-### 16.2 接你自己的可视化或调试界面
+- raycast 只被 obstacle 截断，不会因为 unknown cell 直接中断。
+- 这是为了和原始 `map_sim/raycasting.py` 保持一致：未知高度图空洞不应该挡住模拟雷达视线。
+- `GoalLock.set_goal()` 会重置 stuck 计数和上一帧位置，避免旧目标的 stuck 状态污染新目标。
 
-最简单的接法不是改代码，而是直接替换 RViz 配置：
+关键参数：
+
+| 参数 | 默认 | 说明 |
+|---|---:|---|
+| `planning_rate` | `2.0` | 探索规划频率 |
+| `radar_range` | `5.0` | 模拟雷达射线长度 |
+| `radar_rays` | `180` | 雷达射线数量 |
+| `vision_range` | `1.0` | 近场视野 |
+| `vision_fov` | `270.0` | 近场视野角度 |
+| `frontier_count` | `30` | 每轮评估的 frontier 数 |
+| `frontier_max_dist` | `10.0` | frontier 搜索最大距离 |
+| `safe_radius` | `0.08` | 候选点安全半径 |
+| `trav_threshold` | `0.22` | 可通行阈值 |
+| `arrived_threshold` | `0.2` | 到达目标距离 |
+| `stuck_steps` | `3` | 连续多少轮低位移判定 stuck |
+| `stuck_disp_threshold` | `0.05` | 每轮最低位移阈值 |
+| `enable_unknown_fallback` | `true` | 没有好 frontier 时允许未知 fallback |
+| `enable_last_resort_no_los` | `true` | 最后兜底允许无 LOS 候选 |
+
+## 算法 3：Nav2 MPPI 局部导航
+
+默认链路 (`scripts/run_mppi.sh`) 使用 Nav2 官方 `nav2_mppi_controller`，运动模型为 Omni。
+
+启动方式：
 
 ```bash
-MAP_SIM_RVIZ_CONFIG=/abs/path/to/your_config.rviz bash ./run_sim_local.sh
+ros2 launch launch/nav2_mppi.launch.py
 ```
 
-这样适合这些情况：
+该 launch 文件拉起完整 Nav2 栈：`controller_server` / `planner_server` / `bt_navigator` / `behavior_server` / `smoother_server` / `waypoint_follower` / `lifecycle_manager`，以及 `continuous_navigator.py`（`/goal_pose` → `ComputePathToPose` + `FollowPath` 动作，连续预规划无 stop-and-go）。
 
-- 你想加自己的 Marker / Path / OccupancyGrid 显示
-- 你想把 fixed frame 改成 `odom`
-- 你想加入自己的相机、检测框、轨迹或调试 topic
+配置文件：
 
-如果你要把别的 GUI 工具挂进主链，推荐做法是：
+```text
+config/nav2_mppi_params.yaml
+```
 
-1. 复制 `sim_launch_omni.py`
-2. 在 launch 里增加你的 Node
-3. 保留原有 `gzserver` / `gzclient` / `rviz2` / 控制器启动顺序
+输入：
 
-这样接入最干净，也最不容易和 shell 层环境变量打架。
+```text
+/traversability_map          # Nav2 costmap static_layer 订阅
+/nav_odom                    # bt_navigator odom_topic
+/goal_pose                   # continuous_navigator 接入
+```
 
----
+输出：
 
-### 16.3 接你自己的低层底盘控制器
+```text
+/mppi/cmd_vel_raw            # controller_server remap（sand MPC 开启时）
+/cmd_vel                     # sand MPC 关闭时 controller_server 直接输出
+/plan                        # planner_server 全局路径
+```
 
-如果你要做的是：
+MPPI 采样参数（`FollowPath` 下）：
 
-- 自己实现 swerve inverse kinematics
-- 自己做轮级闭环
-- 自己测某种底盘控制律
+| 参数 | 默认 |
+|---|---:|
+| `controller_frequency` | `20.0` |
+| `batch_size` | `1000` |
+| `time_steps` | `56` |
+| `model_dt` | `0.05` |
+| `iteration_count` | `1` |
+| `temperature` | `0.5` |
+| `gamma` | `0.015` |
+| `motion_model` | `Omni` |
+| `retry_attempt_limit` | `1` |
 
-那你应该直接发：
+运动约束：
 
-- `/steering_position_controller/commands`
-- `/wheel_velocity_controller/commands`
+| 参数 | 默认 |
+|---|---:|
+| `vx_max` | `1.50` |
+| `vx_min` | `-0.30` |
+| `vy_max` | `0.60` |
+| `wz_max` | `1.40` |
+| `ax_max` | `3.0` |
+| `ay_max` | `2.0` |
+| `awz_max` | `3.0` |
 
-但记住：
+代价项（Nav2 Critic scale）：
 
-- 请先移除或禁用 `cmd_vel_to_swerve`
+| Critic | scale | 说明 |
+|---|---:|---|
+| `ConstraintCritic` | `4.0` | 运动约束 |
+| `CostCritic` | `4.0` | costmap 代价（`critical_cost: 5000.0`） |
+| `GoalCritic` | `10.0` | 终点距离 |
+| `GoalAngleCritic` | `1.5` | 朝向目标 |
+| `PathAlignCritic` | `1.5` | 贴近路径 |
+| `PathFollowCritic` | `1.5` | 沿路径推进 |
+| `PathAngleCritic` | `1.5` | 路径角度 |
+| `PreferForwardCritic` | `0.25` | 前进偏好 |
+| `TwirlingCritic` | `0.005` | 抑制原地乱转 |
+| `ObstaclesCritic` | `3.0` | 障碍代价（`collision_cost: 5000.0`，`inflation_radius: 0.25`） |
 
-否则你和默认桥接节点会冲突。
+costmap 配置：
 
----
+| 参数 | 值 |
+|---|---|
+| `local_costmap` `robot_radius` | `0.18` |
+| `local_costmap` `inflation_radius` | `0.25` |
+| `local_costmap` `static_layer` `map_topic` | `/traversability_map` |
+| `global_costmap` `static_layer` `map_topic` | `/traversability_map` |
 
-### 16.4 接 SLAM / 里程计 / 点云感知
+cmd_vel 路由：
 
-最常见的接法：
+```text
+sand MPC ON:  controller_server -> /mppi/cmd_vel_raw -> sand_mpc -> /cmd_vel -> cmd_vel_to_swerve
+sand MPC OFF: controller_server -> /cmd_vel -> cmd_vel_to_swerve
+```
 
-- 点云：
-  - `/livox/lidar`
-  - 或 `/livox/lidar_PointCloud2`
-- IMU：
-  - 推荐 `/imu_fixed`
-  - 如果你要自己处理原始 IMU，可直接订阅 `/livox/imu`
+### C++ mppi_navigator（替代方案）
 
-对于外部 SLAM 来说，这个 bare 版的角色是：
+非默认入口 `scripts/run_elevation_mppi.sh` 使用 C++ `mppi_navigator`（`ros2 run nexus_elevation_mppi mppi_navigator`），源码 `src/nexus_elevation_mppi/src/mppi_navigator.cpp`，参数在 `config/nexus_navigation_stack.yaml` 的 `/mppi_navigator` 段。该节点额外发布 `/mppi/optimal_path`、`/mppi/reference_path_debug`、`/mppi/terrain_cost_map`。`fail_on_all_collision: false` 在所有采样轨迹都碰障碍时不硬停车。
 
-- 只提供仿真输入
-- 不再自带 SLAM 本体
+## 算法 4：Sand MPC 指令补偿
 
-也就是说，你的算法接入点就是这些 topic。
-
----
-
-### 16.5 接需要真值位姿的算法
-
-如果你需要：
-
-- world pose
-- odom
-- TF
-
-先开：
+节点：
 
 ```bash
-MAP_SIM_ENABLE_TF_PUB=1 bash ./run_sim_local.sh
+ros2 run nexus_sand_mpc sand_mpc_compensator
 ```
 
-然后消费：
+源码：
 
-- `/cube_robot/world_pose`
-- `/livox/world_pose`
-- `/nav_odom`
-- `/odom`
-- `odom -> base_footprint`
+```text
+src/nexus_sand_mpc/nexus_sand_mpc/sand_mpc_node.py
+src/nexus_sand_mpc/nexus_sand_mpc/sand_mpc_controller.py
+```
 
-这对：
+输入：
 
-- 评估
-- 监督学习
-- 对比真值
+```text
+/mppi/cmd_vel_raw
+/nav_odom
+```
 
-都很方便。
+输出：
 
----
+```text
+/cmd_vel
+```
 
-### 16.6 接你自己的相机算法
+作用：
 
-当前建议分两种理解。
+```text
+MPPI raw Twist
+  -> 分解线速度模长 v_ref 和角速度 w_ref
+  -> 根据 odom 估计实际 v/w
+  -> 估计 slip
+  -> do-mpc/CasADi 求解 MIMO MPC
+  -> 输出补偿后的 v/w
+  -> 恢复原始 lateral 方向
+  -> 发布 /cmd_vel
+```
 
-#### A. 你只是想保留接口约束
+默认参数：
 
-那你可以直接按照以下 topic 名接设计：
+| 参数 | 默认 | 说明 |
+|---|---:|---|
+| `control_rate` | `20.0` | MPC 输出频率 |
+| `horizon` | `10` | MPC horizon |
+| `dt_nominal` | `0.05` | 离散时间 |
+| `cmd_delay` | `0.05` | 指令延迟模型 |
+| `drive_tau` | `0.08` | 平动一阶响应 |
+| `turn_tau` | `0.08` | 转向一阶响应 |
+| `slip_alpha` | `0.15` | slip 估计更新率 |
+| `slip_init` | `0.10` | 初始 slip |
+| `correction_gain` | `0.25` | odom 观测校正增益 |
+| `v_max` | `1.50` | 最大线速度 |
+| `w_max` | `1.40` | 最大角速度 |
+| `passthrough_on_missing_odom` | `true` | odom 缺失时透传原始指令 |
+| `publish_zero_on_timeout` | `true` | 指令超时时发布 0 |
 
-- `/livox/depth/image_raw`
-- `/livox/depth/camera_info`
-- `/livox/depth/depth/image_raw`
-- `/livox/depth/depth/camera_info`
-- `/livox/depth/points`
+注意：
 
-#### B. 你要真的在当前环境里启用 Gazebo 深度相机
+- 这个 MPC 是库驱动的 do-mpc/CasADi 版本，不是手写求解器。
+- 当前用来放在 MPPI 后面做低层指令补偿，不负责全局路径规划。
+- 如果 odom 暂时没有，它会透传 `/mppi/cmd_vel_raw`，避免链路完全断掉。
 
-当前必须显式放开：
+## 算法 5：四舵轮控制桥
+
+节点：
 
 ```bash
-MAP_SIM_ALLOW_UNSTABLE_DEPTH_CAMERA=1 bash ./run_sim_local_camera.sh
+cmd_vel_to_swerve
 ```
 
-但这条路径不保证稳定。
+源码：
 
-所以如果你只是要给别的系统预留接口，当前更推荐：
+```text
+src/ros2_livox_simulation/scripts/cmd_vel_to_swerve.py
+```
 
-- 把 topic 名和 frame 名先按这里定下来
-- 未来换更稳的相机实现时，尽量不改接口名字
+输入：
 
----
+```text
+/cmd_vel
+```
 
-### 16.7 接你自己的世界 / 模型
+输出：
 
-有两种常见接法。
+```text
+/steering_position_controller/commands
+/wheel_velocity_controller/commands
+```
 
-#### A. 自定义世界文件
+默认几何参数：
 
-直接传绝对路径：
+| 参数 | 默认 |
+|---|---:|
+| `wheel_radius` | `0.10` |
+| `wheelbase` | `0.35` |
+| `track_width` | `0.40` |
+| `max_wheel_speed` | `18.0` |
+| `max_steering_rate` | `5.5` |
+| `module_speed_deadband` | `0.10` |
+| `publish_rate` | `30.0` |
+
+当前默认用 swerve kinematics。wheel sign 已经按 Gazebo 控制方向修正。
+
+## 地图选择
+
+脚本参数可以选择地图：
 
 ```bash
-MAP_SIM_WORLD=/abs/path/to/your.world bash ./run_sim_local.sh
+bash scripts/run_mppi.sh 3
+bash scripts/run_mppi.sh cave
+bash scripts/run_mppi.sh street
 ```
 
-#### B. 额外模型目录
-
-通过环境变量把模型目录加进 Gazebo 搜索路径：
+也可以用环境变量：
 
 ```bash
-MAP_SIM_EXTRA_MODEL_PATHS=/abs/path/to/models bash ./run_sim_local.sh
+MAP_SIM_WORLD=marsyard2020_map_only.world bash scripts/run_mppi.sh
 ```
 
-Launch 层会把它拼进 `GAZEBO_MODEL_PATH`。
+地图列表：
 
----
+| 选择 | 世界文件 | 备注 |
+|---|---|---|
+| `1` | `rm_2026_slam_world.world` | 默认 spawn z 0.19 |
+| `2` | `apollo15_map_only.world` | 默认 spawn z 0.85 |
+| `3` | `marsyard2020_map_only.world` | 默认地图，spawn z 1.60 |
+| `4` | `marsyard2021_map_only.world` | spawn z 2.90 |
+| `5` | `marsyard2022_map_only.world` | spawn z 2.20 |
+| `6` | `mars_gazebo_topography_map_only.world` | spawn z 18.0 |
+| `7` / `showcase` | `space_maps_showcase.world` | spawn z 0.85 |
+| `8` / `cave` / `ltu_cave` | `darpa_cave_01.world` | cave 场景，Livox range 默认较小 |
+| `9` / `street` / `autoware` | `autoware.world` | 街道场景 |
 
-### 16.8 接运行时动态实体
-
-如果你要在仿真跑起来之后再加东西：
-
-- 相机
-- 特定工具模型
-- 目标物体
-
-可以直接走 Gazebo 的 ROS service：
-
-- `/spawn_entity`
-- `/delete_entity`
-- `/get_model_list`
-
-`runtime_depth_camera.py` 就是一个现成例子：
-
-- 先检查 Gazebo service 是否就绪
-- 检查目标模型是否存在
-- 生成 SDF
-- 调用 `/spawn_entity`
-
-如果你要动态挂自己的 Gazebo 模型，可以直接模仿它。
-
----
-
-## 17. 关键内部接口清单
-
-如果你只想快速知道“该接哪里”，看这张表就够了。
-
-| 层级 | 接口 | 类型 | 是否推荐直接给外部用 | 说明 |
-| --- | --- | --- | --- | --- |
-| 高层控制 | `/cmd_vel` | `geometry_msgs/msg/Twist` | 是 | 最推荐 |
-| 低层控制 | `/steering_position_controller/commands` | `std_msgs/msg/Float64MultiArray` | 高级用法 | 需要禁用桥接节点 |
-| 低层控制 | `/wheel_velocity_controller/commands` | `std_msgs/msg/Float64MultiArray` | 高级用法 | 需要禁用桥接节点 |
-| 雷达 | `/livox/lidar` | `livox_ros_driver2/msg/CustomMsg` | 是 | Livox 风格 |
-| 雷达 | `/livox/lidar_PointCloud2` | `sensor_msgs/msg/PointCloud2` | 是 | 标准点云 |
-| IMU | `/livox/imu` | `sensor_msgs/msg/Imu` | 可以 | 原始接口 |
-| IMU | `/imu_fixed` | `sensor_msgs/msg/Imu` | 是 | 推荐外部消费 |
-| 真值位姿 | `/cube_robot/world_pose` | `geometry_msgs/msg/PoseStamped` | 可选 | 需启用 `tf_pub` |
-| 雷达真值位姿 | `/livox/world_pose` | `geometry_msgs/msg/PoseStamped` | 可选 | 需启用 `tf_pub` |
-| 平面里程计 | `/nav_odom` | `nav_msgs/msg/Odometry` | 可选 | 需启用 `tf_pub` |
-| 兼容里程计 | `/odom` | `nav_msgs/msg/Odometry` | 可选 | 需启用 `tf_pub` |
-| 深度图像 | `/livox/depth/*` | 相机相关消息 | 预留 | 当前默认不稳定 |
-
----
-
-## 18. 你应该改哪些文件来接别的东西
-
-### 18.1 只改运行参数，不改代码
-
-改这些环境变量：
-
-- `MAP_SIM_GZCLIENT`
-- `MAP_SIM_WORLD`
-- `MAP_SIM_SPAWN_X`
-- `MAP_SIM_SPAWN_Y`
-- `MAP_SIM_SPAWN_Z`
-- `MAP_SIM_ENABLE_LIVOX`
-- `MAP_SIM_ENABLE_IMU`
-- `MAP_SIM_ENABLE_TF_PUB`
-- `MAP_SIM_LIGHTING_PRESET`
-- `MAP_SIM_LIGHTING_BRIGHTNESS`
-- `MAP_SIM_SOLAR_TIME`
-
-### 18.2 改仿真编排逻辑
-
-改：
-
-- `ws/src/ros2_livox_simulation/launch/sim_launch_omni.py`
-
-适合做：
-
-- 增删运行节点
-- 替换控制桥
-- 替换 IMU 后处理
-- 改启动顺序
-
-### 18.3 改机器人结构或传感器位置
-
-改：
-
-- `ws/src/ros2_livox_simulation/urdf/robot_sim_omni.xacro`
-
-适合做：
-
-- 改底盘尺寸
-- 改轮距轴距
-- 改 Livox / IMU / 相机挂点
-- 增加新传感器 link / joint
-
-### 18.4 改控制器接口
-
-改：
-
-- `ws/src/ros2_livox_simulation/config/cube_rob_omni_ctrl.yaml`
-
-适合做：
-
-- 改控制器种类
-- 改关节组
-- 改 interface 类型
-
-### 18.5 改 `/cmd_vel` 到舵轮的控制逻辑
-
-改：
-
-- `ws/src/ros2_livox_simulation/scripts/cmd_vel_to_swerve.py`
-
-适合做：
-
-- 改 swerve 分解
-- 改限速策略
-- 改角度翻转策略
-- 改对齐减速逻辑
-
-### 18.6 改 IMU 对外行为
-
-改：
-
-- `ws/src/ros2_livox_simulation/src/fix_imu_time.cpp`
-
-适合做：
-
-- 时间偏移
-- 姿态旋转
-- 坐标系重映射
-
-### 18.7 改真值位姿 / odom / TF
-
-改：
-
-- `ws/src/ros2_livox_simulation/src/tf_pub.cpp`
-
-适合做：
-
-- 改 odom frame 逻辑
-- 改输出 topic
-- 改 Livox yaw follow 逻辑
-
----
-
-## 19. 常用命令
-
-### 19.1 构建
+手动设置出生点：
 
 ```bash
-bash ./build_local.sh
+MAP_SIM_SPAWN_X=1.0 \
+MAP_SIM_SPAWN_Y=0.5 \
+MAP_SIM_SPAWN_Z=1.6 \
+bash scripts/run_mppi.sh
 ```
 
-### 19.2 启动推荐 bare 主链（Gazebo GUI + RViz）
+## 常用环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `MAP_SIM_GZCLIENT` | `1` | 是否打开 Gazebo GUI |
+| `MAP_SIM_ENABLE_RVIZ` | `MAP_SIM_GZCLIENT` 或 start 默认 `1` | 是否打开 RViz |
+| `MAP_SIM_ENABLE_HEADLESS_RENDERING` | `0` | Gazebo headless rendering |
+| `MAP_SIM_ENABLE_MPPI_NAVIGATION` | `1` | 是否启用 MPPI 导航栈（Nav2 或 C++ mppi_navigator） |
+| `MAP_SIM_NAV2_PARAMS` | `config/nav2_mppi_params.yaml` | Nav2 MPPI 参数文件（`run_mppi.sh`） |
+| `MAP_SIM_ENABLE_ELEVATION_MAPPING` | `1` | 是否启用 CuPy 高程图 |
+| `MAP_SIM_ENABLE_NOVELTY_EXPLORATION` | `1` | 是否启用自动探索 |
+| `MAP_SIM_ENABLE_SAND_MPC` | `1` | 是否启用 sand MPC |
+| `MAP_SIM_ENABLE_DEFAULT_STACK` | `0` | 旧 GP/FastLIO 默认栈 |
+| `MAP_SIM_ENABLE_TF_PUB` | `run_mppi` 内部默认 `1` | 真值位姿/odom/TF 发布 |
+| `MAP_SIM_TF_PUB_PUBLISH_NAV_TF` | `0` in MPPI path | 是否发布 nav TF |
+| `MAP_SIM_ENABLE_POINTCLOUD_PIPELINE` | `1` in MPPI path | 点云转换管线 |
+| `MAP_SIM_ENABLE_FASTLIO2` | `0` | 是否启用 FAST-LIO2 |
+| `MAP_SIM_WORLD` | `marsyard2020_map_only.world` | 世界文件 |
+| `MAP_SIM_MAP` | 空 | 地图编号/别名 |
+| `MAP_SIM_MPPI_BOOT_DELAY` | `10` in `run_mppi.sh` | 基础仿真启动后延迟启动算法节点 |
+| `MAP_SIM_FORCE_CLEAN_START` | `1` | 启动前自动清旧 Gazebo 进程 |
+| `MAP_SIM_GAZEBO_MASTER_PORT` | `11345` | Gazebo master port |
+| `MAP_SIM_ELEVATION_OUTPUT_DIR` | `output/elevation_maps/<stamp>` | 高程图导出目录 |
+| `MAP_SIM_LIVOX_SAMPLES` | `20000` | Livox 每帧采样数 |
+| `MAP_SIM_LIVOX_MAX_RANGE` | `70.0` | Livox 最大距离 |
+
+示例：更稳定的服务器跑法：
 
 ```bash
-bash ./run_sim_local.sh
+MAP_SIM_GZCLIENT=0 \
+MAP_SIM_ENABLE_RVIZ=0 \
+MAP_SIM_ENABLE_SOLAR_TIME_PANEL=0 \
+MAP_SIM_ENABLE_HEADLESS_RENDERING=1 \
+bash scripts/run_mppi.sh
 ```
 
-### 19.3 显式启动 GUI 快捷入口
+## 手动发目标
+
+先关探索：
 
 ```bash
-bash ./run_sim_local_gui.sh
+MAP_SIM_ENABLE_NOVELTY_EXPLORATION=0 bash scripts/run_mppi.sh
 ```
 
-### 19.4 启动 headless
+另一个终端发 goal：
 
 ```bash
-MAP_SIM_GZCLIENT=0 bash ./run_sim_local.sh
+source /opt/ros/humble/setup.bash
+source ~/NEXUS/NEXUS_GAZEBO_SIM/install/setup.bash
+
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{
+  header: {frame_id: 'world'},
+  pose: {
+    position: {x: 1.0, y: 0.0, z: 0.0},
+    orientation: {w: 1.0}
+  }
+}"
 ```
 
-### 19.5 只开 Gazebo，不开 RViz
+如果用的是默认 Nav2 链路，`/goal_pose` 会被 `continuous_navigator.py` 接入 Nav2 的 `ComputePathToPose` + `FollowPath`，Nav2 自己规划路径。`/mppi/reference_path` 只有 C++ `mppi_navigator` 模式（`run_elevation_mppi.sh`）才消费。
+
+## RViz 观察重点
+
+默认 RViz 配置：
+
+```text
+src/nexus_elevation_mppi/config/nexus_elevation_mapping.rviz
+```
+
+建议看这些层：
+
+| 显示 | Topic | 目的 |
+|---|---|---|
+| OccupancyGrid | `/traversability_map` | 高度差通行图是否正常 |
+| OccupancyGrid | `/novelty_explorer/radar_known` | 模拟雷达观测是否能展开 |
+| OccupancyGrid | `/novelty_explorer/novelty_map` | frontier/novelty 是否在变化 |
+| Path | `/mppi/reference_path` | 探索发布的参考路径（Nav2 不消费，仅供调试） |
+| Path | `/plan` | Nav2 planner_server 全局规划路径 |
+| Path | `/local_plan` | Nav2 controller_server 局部轨迹 |
+| OccupancyGrid | `/local_costmap/costmap` | Nav2 局部 costmap |
+| TF / RobotModel | `base_link`/robot | 车体姿态和关节 |
+
+> C++ `mppi_navigator` 模式下还可看 `/mppi/optimal_path`、`/mppi/terrain_cost_map`，Nav2 模式下不存在。
+
+## CLI 调试命令
+
+确认节点：
 
 ```bash
-MAP_SIM_ENABLE_RVIZ=0 bash ./run_sim_local.sh
+ros2 node list | sort
 ```
 
-### 19.6 选择 cave 场景
+确认 topic：
 
 ```bash
-bash ./run_sim_local.sh cave
+ros2 topic list -t | sort
 ```
 
-### 19.7 启用 TF / odom 输出
+看频率：
 
 ```bash
-MAP_SIM_ENABLE_TF_PUB=1 bash ./run_sim_local.sh
+ros2 topic hz /traversability_map
+ros2 topic hz /goal_pose
+ros2 topic hz /mppi/cmd_vel_raw
+ros2 topic hz /cmd_vel
+ros2 topic hz /wheel_velocity_controller/commands
+ros2 topic hz /plan
 ```
 
-### 19.8 使用自定义 RViz 配置
+看一条消息：
 
 ```bash
-MAP_SIM_RVIZ_CONFIG=/abs/path/to/your_config.rviz bash ./run_sim_local.sh
+ros2 topic echo --once /goal_pose
+ros2 topic echo --once /mppi/cmd_vel_raw
+ros2 topic echo --once /cmd_vel
+ros2 topic echo --once /nav_odom
 ```
 
-### 19.9 清理仿真残留
+看 QoS：
 
 ```bash
-bash ./runlocal/stop.sh
+ros2 topic info /traversability_map -v
+ros2 topic info /cmd_vel -v
 ```
 
-### 19.10 查看深度相机运行时状态
+看参数：
 
 ```bash
-bash ./open_depth_camera.sh --status
+ros2 param list /controller_server
+ros2 param get /controller_server FollowPath.batch_size
+ros2 param get /novelty_explorer radar_range
+ros2 param get /sand_mpc_compensator control_rate
 ```
 
----
+动态调参示例：
 
-## 20. 已知限制
+```bash
+ros2 param set /controller_server FollowPath.ObstaclesCritic.scale 2.0
+ros2 param set /controller_server FollowPath.batch_size 500
+ros2 param set /novelty_explorer frontier_max_dist 8.0
+```
 
-### 20.1 深度相机默认不可用
+## 自测流程
 
-原因不是接口没写，而是：
+构建检查：
 
-- 当前 Gazebo Classic 环境里
-- 一旦真正启用深度相机输出
-- `gzserver` / `gzclient` 可能会因为 OGRE 断言退出
+```bash
+bash -n scripts/run_sim.sh scripts/run_mppi.sh scripts/stop.sh
 
-所以当前 bare 版策略是：
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+colcon build --packages-select nexus_elevation_mppi nexus_sand_mpc --symlink-install
+```
 
-- 保留深度相机接口定义
-- 保留相机挂点
-- 保留运行时相机工具
-- 默认不让它进入稳定主链
+Python 语法检查：
 
-### 20.2 `tf_pub` 默认关闭
+```bash
+/usr/bin/python3 -m py_compile \
+  src/nexus_elevation_mppi/scripts/traversability_to_map.py \
+  src/nexus_elevation_mppi/scripts/novelty_explorer.py \
+  src/nexus_elevation_mppi/scripts/elevation_map_exporter.py \
+  src/nexus_sand_mpc/nexus_sand_mpc/sand_mpc_controller.py \
+  src/nexus_sand_mpc/nexus_sand_mpc/sand_mpc_node.py
+```
 
-原因不是它不能用，而是：
+最小运行检查：
 
-- bare 版默认尽量少起不必要桥接
-- 让你自己决定是否需要真值 pose / odom / TF
+```bash
+MAP_SIM_GZCLIENT=0 \
+MAP_SIM_ENABLE_RVIZ=0 \
+MAP_SIM_ENABLE_NOVELTY_EXPLORATION=1 \
+MAP_SIM_ENABLE_SAND_MPC=1 \
+bash scripts/run_mppi.sh
+```
 
-### 20.3 classic 分支保留但不是主路线
+运行中另开终端检查：
 
-`classic` / `legacy` 分支仍在，但当前副本的主要验证和推荐使用路径是：
+```bash
+ros2 topic hz /goal_pose
+ros2 topic hz /mppi/cmd_vel_raw
+ros2 topic hz /cmd_vel
+ros2 topic hz /wheel_velocity_controller/commands
+ros2 topic echo --once /nav_odom
+```
 
-- `omni`
+判断全链路是否活着：
 
----
+| 检查项 | 期望 |
+|---|---|
+| `/traversability_map` | 持续发布，宽高非 0 |
+| `/novelty_explorer/radar_known` | 有 free/obstacle/unknown 分布 |
+| `/goal_pose` | 探索启动后持续/周期性更新 |
+| `/plan` | Nav2 planner 有全局路径，poses 非空 |
+| `/mppi/cmd_vel_raw` | sand MPC 开启时非全 0 |
+| `/cmd_vel` | sand MPC 后非全 0（或 sand MPC 关闭时 controller 直接输出） |
+| `/wheel_velocity_controller/commands` | 有轮速输出 |
+| `/nav_odom` | 位姿随时间变化 |
 
-## 21. 对接别的系统时的推荐原则
+## 和 2D map_sim/runsim 的关系
 
-如果你只记 6 条，请记下面这 6 条：
+当前 Gazebo 链路不是把 2D 仿真直接搬过来，而是把主干算法语义接入真实仿真：
 
-1. 高层控制优先发 `/cmd_vel`，不要一开始就碰底层舵轮控制器。
-2. 做 SLAM / 感知时优先订阅 `/livox/lidar_PointCloud2` 和 `/imu_fixed`。
-3. 需要真值位姿时再开 `MAP_SIM_ENABLE_TF_PUB=1`。
-4. 要改默认可视化，优先换 `MAP_SIM_RVIZ_CONFIG`，再考虑改 launch。
-5. 要做机器人结构或传感器布局改动，优先改 `robot_sim_omni.xacro`。
-6. 要替换整个控制逻辑，优先改 `sim_launch_omni.py` 和 `cmd_vel_to_swerve.py`，不要在外面和默认桥接节点抢同一控制器。
+| 2D `map_sim/runsim` | Gazebo 当前链路 |
+|---|---|
+| 理想 height/elevation map | `elevation_mapping_cupy` 从 Livox 点云生成 |
+| 高度差通行性 | `traversability_to_map.py` |
+| raycast radar | `novelty_explorer.py` 中的 radar/vision raycast |
+| frontier/novelty | `novelty_explorer.py` |
+| local goal/path | `/goal_pose`（Nav2 自规划路径；C++ 模式另有 `/mppi/reference_path`） |
+| 2D 运动学执行 | Gazebo 四舵轮 + MPPI + sand MPC |
 
----
+已经对齐的点：
 
-## 22. 当前验证结论
+- raycast 不被 unknown cell 截断。
+- 高度差通行图使用局部 height range。
+- 探索目标通过 goal lock 保持，不每帧无意义乱跳。
+- stuck/unreachable/path_jump 会释放目标并重选。
 
-这个 bare 版当前已验证：
+还没有完全等价的点：
 
-- `build_local.sh` 可完成构建
-- `run_sim_local.sh` 可拉起 bare 主链
-- 车体和环境能正常运行
-- `run_sim_local.sh` 当前默认可拉起 Gazebo GUI + RViz
-- `run_sim_local_gui.sh` 可显式拉起 Gazebo GUI + RViz
-- `gzclient` 可正常启动
-- `rviz2` 可正常启动
-- `map_sim_rviz` 节点可进入 ROS graph
-- `/livox/lidar` 正常
-- `/livox/lidar_PointCloud2` 正常
-- `/livox/imu` 正常
-- `/imu_fixed` 正常
-- `/joint_states` 正常
-- `/dynamic_joint_states` 正常
-- omni 控制器可成功进入 active
-- `/cmd_vel` 可被内部桥接成非零的转向和轮速控制命令
+- Gazebo 中有舵轮动力学、控制延迟、地形接触、传感器噪声。
+- 高程图来自点云累积，不是 2D 完整真值图。
+- MPPI/sand MPC 会影响实际路径，2D 里通常更理想。
+- 尚未跑同地图、同起点、同时间的覆盖率 benchmark。
 
-当前未作为稳定主链开放：
+建议后续 benchmark 指标：
 
-- `/livox/depth/*`
+| 指标 | 说明 |
+|---|---|
+| known/free cell coverage | 已探索可通行面积 |
+| frontier count over time | frontier 消耗速度 |
+| path length | 实际轨迹长度 |
+| displacement | 净位移 |
+| stuck releases | stuck 触发次数 |
+| unreachable releases | unreachable 触发次数 |
+| Nav2 recovery 触发次数 | controller 频繁 spin/backup 的压力 |
+| command nonzero ratio | 控制输出连续性 |
 
----
+## 常见问题
 
-## 23. 一句话总结
+### 1. Gazebo spawn 失败
 
-这份 `NEXUS_GAZEBO_SIM` 现在最适合被当成：
+现象：
 
-> 一个保留车、环境、Gazebo GUI、RViz、控制桥和传感器接口的 Gazebo 仿真底座。
+```text
+Service /spawn_entity unavailable
+```
 
-如果你要接自己的：
+处理：
 
-- 控制器
-- 规划器
-- SLAM
-- 感知
-- 数据采集脚本
+```bash
+bash scripts/stop.sh
+MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
+```
 
-优先从这些接口入手：
+如果 headless 可以，GUI 不行，优先怀疑 X/GLX/显卡环境。
 
-- 控制输入：`/cmd_vel`
-- 点云输入：`/livox/lidar` 或 `/livox/lidar_PointCloud2`
-- IMU 输入：`/imu_fixed`
-- 真值位姿：开启 `MAP_SIM_ENABLE_TF_PUB=1` 后读取 `/cube_robot/world_pose` / `/nav_odom`
+### 2. Gazebo GUI 卡死或 `BadDrawable`
 
-这样接入成本最低，也最不容易和内部实现打架。
+处理：
+
+```bash
+MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
+```
+
+当前 `run_sim.sh` 在 `MAP_SIM_GZCLIENT!=1` 时会清空 `DISPLAY/WAYLAND_DISPLAY`，避免 Gazebo Classic 误连不可用显示。
+
+### 3. 没有 `/traversability_map`
+
+检查：
+
+```bash
+ros2 topic hz /elevation_mapping_node/elevation_map
+ros2 topic echo --once /elevation_mapping_node/elevation_map
+ros2 topic hz /traversability_map
+```
+
+如果高程图没有，先查 Livox 点云：
+
+```bash
+ros2 topic hz /livox/lidar_PointCloud2
+```
+
+如果 Livox 有但高程图没有，检查 CuPy workspace 是否 source/build。
+
+### 4. 探索不发 goal
+
+检查：
+
+```bash
+ros2 topic hz /traversability_map
+ros2 topic hz /novelty_explorer/radar_known
+ros2 topic hz /goal_pose
+ros2 topic echo --once /nav_odom
+```
+
+常见原因：
+
+- 通行图全 unknown。
+- 机器人 pose/odom 超时。
+- `radar_known` 没展开，说明 raycast 或地图坐标有问题。
+- frontier 都被判定不可达或不安全。
+
+可临时放宽：
+
+```bash
+ros2 param set /novelty_explorer safe_radius 0.08
+ros2 param set /novelty_explorer frontier_max_dist 12.0
+ros2 param set /novelty_explorer enable_unknown_fallback true
+```
+
+### 5. MPPI 有 goal 但车不动
+
+检查链路：
+
+```bash
+ros2 topic hz /goal_pose
+ros2 topic hz /plan
+ros2 topic hz /mppi/cmd_vel_raw
+ros2 topic hz /cmd_vel
+ros2 topic hz /wheel_velocity_controller/commands
+ros2 topic echo --once /mppi/cmd_vel_raw
+ros2 topic echo --once /cmd_vel
+```
+
+定位：
+
+| 现象 | 可能原因 |
+|---|---|
+| `/goal_pose` 有，`/plan` 没有 | Nav2 planner 等 costmap/odom，或 goal frame 不对 |
+| `/plan` 有，`/mppi/cmd_vel_raw` 没有 | controller_server 等 odom/TF，或 costmap 未就绪 |
+| raw 有，`/cmd_vel` 没有 | sand MPC 没启动或崩了 |
+| `/cmd_vel` 有，wheel 没有 | `cmd_vel_to_swerve` 或 controller 问题 |
+| wheel 有，odom 不动 | Gazebo controller/关节/摩擦问题 |
+
+### 6. Nav2 MPPI 局部代价紧
+
+如果 Nav2 controller 频繁恢复（spin/backup）或轨迹质量差，说明局部 costmap 代价偏紧。可以试：
+
+```bash
+ros2 param set /controller_server FollowPath.ObstaclesCritic.scale 2.0
+ros2 param set /controller_server FollowPath.CostCritic.scale 3.0
+ros2 param set /controller_server FollowPath.ObstaclesCritic.inflation_radius 0.20
+```
+
+也可以调高度差图降低障碍密度：
+
+```bash
+ros2 param set /traversability_to_map full_at_m 0.12
+ros2 param set /traversability_to_map accumulate_from_m  0.06
+```
+
+> C++ `mppi_navigator` 模式下的 all-collision 软警告（`fail_on_all_collision: false`）只存在于 `run_elevation_mppi.sh` 链路，默认 Nav2 链路不产生该日志。
+
+### 7. sand MPC 报缺 do-mpc/CasADi
+
+确认系统 Python：
+
+```bash
+/usr/bin/python3 - <<'PY'
+import casadi
+import do_mpc
+print("ok")
+PY
+```
+
+安装：
+
+```bash
+/usr/bin/python3 -m pip install --user casadi do-mpc
+```
+
+### 8. 停止时出现 `ExternalShutdownException`
+
+如果在 Ctrl-C 或 `scripts/stop.sh` 后看到：
+
+```text
+rclpy.executors.ExternalShutdownException
+```
+
+这通常是 ROS 2 Python 节点收到 shutdown 后的退出栈，不代表运行中算法崩溃。真正需要处理的是运行阶段反复出现的 exception、节点提前退出、topic 中断或 Gazebo spawn/controller 失败。
+
+### 9. Gazebo master 端口被占用
+
+处理：
+
+```bash
+bash scripts/stop.sh
+lsof -nP -iTCP:11345 -sTCP:LISTEN
+```
+
+如需换端口：
+
+```bash
+MAP_SIM_GAZEBO_MASTER_PORT=11346 bash scripts/run_mppi.sh
+```
+
+## License
+
+**版权所有 © 2026 Charles。保留所有权利。**
+
+本项目为专有授权（All Rights Reserved）。未经作者书面授权，不得使用、复制、修改、传播、部署或将本项目用于任何商业、比赛、科研、教学或其他用途。完整授权声明见 [LICENSE](LICENSE)。
+
+- 原创代码（`src/nexus_*/`）: All Rights Reserved, Copyright © 2026 Charles
+- 第三方代码（`src/third_party/`, `src/livox_ros_driver2/`, `src/ros2_livox_simulation/`）: 保留各自原始许可证，详见 [NOTICE.md](NOTICE.md)
+
+如需授权，请提前联系作者取得书面许可。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 推荐开发流程
+
+改算法前：
+
+```bash
+bash scripts/stop.sh
+git status --short
+```
+
+改 Python 节点后：
+
+```bash
+/usr/bin/python3 -m py_compile <changed_file.py>
+colcon build --packages-select <package> --symlink-install
+```
+
+改 Nav2 参数或 launch 后：
+
+```bash
+bash -n scripts/run_sim.sh scripts/run_mppi.sh scripts/stop.sh
+# Nav2 参数改 config/nav2_mppi_params.yaml 后无需构建，重启 run_mppi.sh 即可
+```
+
+改 C++ mppi_navigator 后（仅 `run_elevation_mppi.sh` 链路）：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+colcon build --packages-select nexus_elevation_mppi --symlink-install
+```
+
+改 launch/script 后：
+
+```bash
+bash -n scripts/run_sim.sh scripts/run_mppi.sh scripts/stop.sh
+```
+
+跑完整链路：
+
+```bash
+MAP_SIM_GZCLIENT=0 MAP_SIM_ENABLE_RVIZ=0 bash scripts/run_mppi.sh
+```
+
+停止并确认无残留：
+
+```bash
+bash scripts/stop.sh
+pgrep -af 'gzserver|gzclient|ros2|controller_server|planner_server|bt_navigator|novelty_explorer|sand_mpc_compensator|cmd_vel_to_swerve'
+```
+
+## 当前主要调参入口
+
+通行图 / 探索 / sand MPC 调 `config/nexus_navigation_stack.yaml`；Nav2 MPPI 调 `config/nav2_mppi_params.yaml`：
+
+```text
+/traversability_to_map:                      # nexus_navigation_stack.yaml
+  kernel_size
+  clear_below_m
+  accumulate_from_m
+  full_at_m
+  median_filter_size
+
+/novelty_explorer:                            # nexus_navigation_stack.yaml
+  radar_range
+  radar_rays
+  frontier_count
+  frontier_max_dist
+  safe_radius
+  trav_threshold
+  stuck_steps
+  stuck_disp_threshold
+
+controller_server / FollowPath:               # nav2_mppi_params.yaml
+  batch_size
+  time_steps
+  model_dt
+  vx_max / vy_max / wz_max
+  vx_std / vy_std / wz_std
+  temperature
+  ConstraintCritic.scale
+  CostCritic.scale
+  GoalCritic.scale
+  ObstaclesCritic.scale
+  ObstaclesCritic.collision_cost
+  ObstaclesCritic.inflation_radius
+
+/sand_mpc_compensator:                        # nexus_navigation_stack.yaml
+  horizon
+  dt_nominal
+  cmd_delay
+  drive_tau
+  turn_tau
+  slip_alpha
+  correction_gain
+  q_v / q_w
+  r_du_v / r_du_w
+```
+
+## 何时认为“跑通”
+
+最低标准：
+
+```text
+1. Gazebo 成功 spawn 机器人
+2. /livox/lidar_PointCloud2 有数据
+3. /elevation_mapping_node/elevation_map 有数据
+4. /traversability_map 有数据
+5. /novelty_explorer/radar_known 有展开
+6. /goal_pose 有发布
+7. /plan 有 poses（Nav2 planner 输出）
+8. /mppi/cmd_vel_raw 非全 0（sand MPC 开启时）
+9. /cmd_vel 非全 0
+10. wheel/steering controller 有命令
+11. /nav_odom 位姿变化
+```
+
+工程可用标准：
+
+```text
+1. 连续运行 3-5 分钟不崩
+2. 机器人净位移明显大于 0
+3. 探索 goal/path 持续更新
+4. Nav2 controller 没有频繁恢复（spin/backup）
+5. stop.sh 能清干净进程
+```
+
+算法等价标准：
+
+```text
+需要和 2D runsim 做固定地图 benchmark：
+同地图、同起点、同时间、同探测半径，
+比较覆盖率、路径长度、卡住次数、重复探索比例。
+当前还没有完成这一层证明。
+```
