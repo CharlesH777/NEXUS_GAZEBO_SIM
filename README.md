@@ -1210,17 +1210,6 @@ lsof -nP -iTCP:11345 -sTCP:LISTEN
 MAP_SIM_GAZEBO_MASTER_PORT=11346 bash scripts/run_mppi.sh
 ```
 
-## License
-
-**版权所有 © 2026 Charles。保留所有权利。**
-
-本项目为专有授权（All Rights Reserved）。未经作者书面授权，不得使用、复制、修改、传播、部署或将本项目用于任何商业、比赛、科研、教学或其他用途。完整授权声明见 [LICENSE](LICENSE)。
-
-- 原创代码（`src/nexus_*/`）: All Rights Reserved, Copyright © 2026 Charles
-- 第三方代码（`src/third_party/`, `src/livox_ros_driver2/`, `src/ros2_livox_simulation/`）: 保留各自原始许可证，详见 [NOTICE.md](NOTICE.md)
-
-如需授权，请提前联系作者取得书面许可。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
 ## 推荐开发流程
 
 改算法前：
@@ -1355,3 +1344,17 @@ controller_server / FollowPath:               # nav2_mppi_params.yaml
 比较覆盖率、路径长度、卡住次数、重复探索比例。
 当前还没有完成这一层证明。
 ```
+
+## 版权与使用限制
+
+**版权所有 © 2026 Charles。保留所有权利。**
+
+本项目为专有授权（All Rights Reserved）。访问、浏览、下载或获取本项目源码，不代表获得任何使用许可或其他授权。
+
+未经作者或团队事先书面授权，任何个人、组织或团队不得使用、运行、部署、复制、修改、传播、发布、上传、分享、出售、出租、转让、再授权、反编译、反向工程或二次开发本项目的全部或部分内容。
+
+未经书面授权，不得将本项目全部或部分内容用于任何商业、比赛、竞赛、挑战赛、评测、评奖、课程设计、毕业设计、科研项目、论文复现、公开展示、教学或其他用途。
+
+原创代码（`src/nexus_*/`）采用 All Rights Reserved，Copyright © 2026 Charles。第三方代码（`src/third_party/`, `src/livox_ros_driver2/`, `src/ros2_livox_simulation/` 等）保留各自原始许可证，详见 [NOTICE.md](NOTICE.md)。完整授权声明见 [LICENSE](LICENSE)。
+
+如需授权，请提前联系作者或团队取得书面许可。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
